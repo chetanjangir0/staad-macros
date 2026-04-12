@@ -578,91 +578,13 @@ End If
     ' C10 : 1 DL  + 0.8 LL + 0.8 WL
     '      All DL cases combined with all WL cases  (one combined combination)
     '==========================================================================
-     'nCurr = nCurr + 1
+Call GenerateLateralCombosSLS(staad,  _
+    nDL, nLL, nRL, nCRL, nWL, _
+    DL_LC, LL_LC, RL_LC, CRL_LC, WL_LC, "WL")
 
-    '-------------------------------------------------
-    ' Build combination name dynamically
-    '-------------------------------------------------
-    CombName = "1DL"
-
-    If nLL > 0 Then
-        CombName = CombName & " + 0.8LL"
-    End If
-
-    If nRL > 0 Then
-        CombName = CombName & " + 0.8RL"
-    End If
-
-    'If nCRL > 0 Then
-        'If iLead = 3 Then
-            'CombName = CombName & " + 1.2CRL"
-        'Else
-            'CombName = CombName & " + 1.05CRL"
-        'End If
-    'End If
-
-    '-------------------------------------------------
-    ' IF Crane load
-    '-------------------------------------------------
-    If nCRL > 0 Then
-    For iCRL = 0 To nCRL - 1
-    For iWL = 0 To nWL - 1
-
-        newComb = NextComb(staad)
-        staad.Load.CreateNewLoadCombination CombName & " + 0.8CRL" & iCRL + 1 & "+ 0.8WL" & iWL+1, newComb
-
-
-        'DL
-        For iDL = 0 To nDL - 1
-            staad.Load.AddLoadAndFactorToCombination newComb, DL_LC(iDL), 1
-        Next iDL
-
-        'LL
-        For iLL = 0 To nLL - 1
-                staad.Load.AddLoadAndFactorToCombination newComb, LL_LC(iLL), 0.8
-        Next iLL
-
-        'RL
-        For iRL = 0 To nRL - 1
-                staad.Load.AddLoadAndFactorToCombination newComb, RL_LC(iRL), 0.8
-        Next iRL
-
-        'Single crane load
-            staad.Load.AddLoadAndFactorToCombination newComb, CRL_LC(iCRL), 0.8
-
-        'Wind Load
-        staad.Load.AddLoadAndFactorToCombination newComb, WL_LC(iWL), 0.8
-    Next iWL
-    Next iCRL
-Else
-    For iWL = 0 To nWL - 1
-        newComb = NextComb(staad)
-        staad.Load.CreateNewLoadCombination CombName & "+ 0.8WL" & iWL+1, newComb
-    
-        '-------------------------------------------------
-        ' Dead loads
-        '-------------------------------------------------
-        For iDL = 0 To nDL - 1
-            staad.Load.AddLoadAndFactorToCombination newComb, DL_LC(iDL), 1
-        Next iDL
-    
-        '-------------------------------------------------
-        ' Live load
-        '-------------------------------------------------
-        For iLL = 0 To nLL - 1
-                staad.Load.AddLoadAndFactorToCombination newComb, LL_LC(iLL), 0.8
-        Next iLL
-    
-        '-------------------------------------------------
-        ' Roof live
-        '-------------------------------------------------
-        For iRL = 0 To nRL - 1
-                staad.Load.AddLoadAndFactorToCombination newComb, RL_LC(iRL), 0.8
-        Next iRL
-        staad.Load.AddLoadAndFactorToCombination newComb, WL_LC(iWL), 0.8
-    Next iWL
-End If
-    nGenerated = nGenerated + 1
+Call GenerateLateralCombosSLS(staad, _
+    nDL, nLL, nRL, nCRL, nEQ, _
+    DL_LC, LL_LC, RL_LC, CRL_LC, EQ_LC, "EL")
 
         '==========================================================================
     ' C12 : 1 DL  +  1 WL   (one combination per wind direction)
@@ -688,6 +610,7 @@ End If
 
 End Sub
 
+' case with LL + WL/EL in strength
 Sub GenerateLateralCombos(staad As Object, _
                            ByRef nGenerated As Long, _
                            nDL As Integer, nLL As Integer, nRL As Integer, nCRL As Integer, _
@@ -778,6 +701,99 @@ Sub GenerateLateralCombos(staad As Object, _
 SkipLead:
     Next iLead
 
+End Sub
+
+' combo with 0.8WL/EL in serviciability
+Sub GenerateLateralCombosSLS(staad As Object, _
+                           nDL As Integer, nLL As Integer, nRL As Integer, nCRL As Integer, _
+                           nLatLC As Integer, _
+                           DL_LC() As Long, LL_LC() As Long, RL_LC() As Long, CRL_LC() As Long, _
+                           LatLC() As Long, sLatTag As String)
+
+    Dim iWL As Integer, iCRL As Integer
+    Dim iDL As Integer, iLL As Integer, iRL As Integer
+    Dim CombName As String
+    Dim newComb As Long
+
+    CombName = "1DL"
+
+    If nLL > 0 Then
+        CombName = CombName & " + 0.8LL"
+    End If
+
+    If nRL > 0 Then
+        CombName = CombName & " + 0.8RL"
+    End If
+
+    'If nCRL > 0 Then
+        'If iLead = 3 Then
+            'CombName = CombName & " + 1.2CRL"
+        'Else
+            'CombName = CombName & " + 1.05CRL"
+        'End If
+    'End If
+
+    '-------------------------------------------------
+    ' IF Crane load
+    '-------------------------------------------------
+    If nCRL > 0 Then
+    For iCRL = 0 To nCRL - 1
+    For iWL = 0 To nLatLC - 1
+
+        newComb = NextComb(staad)
+        staad.Load.CreateNewLoadCombination CombName & " + 0.8CRL" & iCRL + 1 & " + 0.8" & sLatTag & iWL+1, newComb
+
+
+        'DL
+        For iDL = 0 To nDL - 1
+            staad.Load.AddLoadAndFactorToCombination newComb, DL_LC(iDL), 1
+        Next iDL
+
+        'LL
+        For iLL = 0 To nLL - 1
+                staad.Load.AddLoadAndFactorToCombination newComb, LL_LC(iLL), 0.8
+        Next iLL
+
+        'RL
+        For iRL = 0 To nRL - 1
+                staad.Load.AddLoadAndFactorToCombination newComb, RL_LC(iRL), 0.8
+        Next iRL
+
+        'Single crane load
+            staad.Load.AddLoadAndFactorToCombination newComb, CRL_LC(iCRL), 0.8
+
+        'Wind Load
+        staad.Load.AddLoadAndFactorToCombination newComb, LatLC(iWL), 0.8
+    Next iWL
+    Next iCRL
+Else
+    For iWL = 0 To nLatLC - 1
+        newComb = NextComb(staad)
+        staad.Load.CreateNewLoadCombination CombName & " + 0.8" & sLatTag & iWL+1, newComb
+    
+        '-------------------------------------------------
+        ' Dead loads
+        '-------------------------------------------------
+        For iDL = 0 To nDL - 1
+            staad.Load.AddLoadAndFactorToCombination newComb, DL_LC(iDL), 1
+        Next iDL
+    
+        '-------------------------------------------------
+        ' Live load
+        '-------------------------------------------------
+        For iLL = 0 To nLL - 1
+                staad.Load.AddLoadAndFactorToCombination newComb, LL_LC(iLL), 0.8
+        Next iLL
+    
+        '-------------------------------------------------
+        ' Roof live
+        '-------------------------------------------------
+        For iRL = 0 To nRL - 1
+                staad.Load.AddLoadAndFactorToCombination newComb, RL_LC(iRL), 0.8
+        Next iRL
+        staad.Load.AddLoadAndFactorToCombination newComb, LatLC(iWL), 0.8
+    Next iWL
+End If
 End Sub
 
 'Function NextComb(staad As Object) As Long
