@@ -1,11 +1,5 @@
 ﻿'/*--------------------------------------------------------------------------------------+
-'|
 '|  IS 800:2007 Load Combination Generator for STAAD.Pro
-'|  Version 2.0
-'|
-'|  Automatically reads all primary load cases from the open model.
-'|  User assigns each load case a category, then clicks Generate.
-'|
 '+--------------------------------------------------------------------------------------*/
 Option Explicit
 
@@ -196,7 +190,7 @@ Sub ShowCategoryDialog(staad As Object)
 End Sub
 
 '==============================================================================
-' STEP 2 : Create all IS 800:2007 Table 4 ULS combinations in STAAD.Pro
+' STEP 2 : Create all IS 800:2007 Table 4 combinations in STAAD.Pro
 '==============================================================================
 Sub GenerateCombinations(staad As Object, _
     nDL As Integer, DL_LC() As Long, _
@@ -207,62 +201,19 @@ Sub GenerateCombinations(staad As Object, _
     nCRL As Integer, CRL_LC() As Long, CRL_Lbl() As String, _
     nStart As Integer, _
     nStartSLS As Integer)
-
-    '--------------------------------------------------------------------------
-    ' Guard against overwriting existing combinations
-    '--------------------------------------------------------------------------
-    'Dim nCombCount As Long
-    'nCombCount = staad.Load.GetLoadCombinationCaseCount()
-    'Dim nMaxExist As Long
-    'nMaxExist = 0
-'
-    'If nCombCount > 0 Then
-        'Dim ExArr() As Long
-        'ReDim ExArr(nCombCount - 1)
-        'staad.Load.GetLoadCombinationCaseNumbers ExArr()
-        'Dim x As Integer
-        'For x = 0 To nCombCount - 1
-            'If ExArr(x) > nMaxExist Then nMaxExist = ExArr(x)
-        'Next x
-    'End If
-'
+    
     Dim newComb As Long
-    'nMaxExist = NextComb(staad)
-    'If nMaxExist >= nStart Then
-        'If MsgBox("Combination " & nMaxExist & " already exists." & Chr(13) & _
-                  '"New combinations will start from " & nMaxExist + 1 & ". Continue?", _
-                  'vbOkCancel) = vbCancel Then Exit Sub
-    'End If
 
     '--------------------------------------------------------------------------
     ' Helper variables
     '--------------------------------------------------------------------------
-    Dim nGenerated As Integer
-    nGenerated = 0
+
     Dim iDL As Integer, iLL As Integer, iWL As Integer, iEQ As Integer
     Dim CombName As String
 
     Dim iRL As Integer
     Dim iCRL As Integer
     Dim iLead As Integer
-
-    ''==========================================================================
-    '' C1 : 1.5 DL  +  1.5 LL
-    ''      All DL cases combined with all LL cases  (one combined combination)
-    ''==========================================================================
-    'nCurr = nCurr + 1
-    'CombName = "1.5DL + 1.5LL"
-    'staad.Load.CreateNewLoadCombination CombName, nCurr
-    'For iDL = 0 To nDL - 1
-        'staad.Load.AddLoadAndFactorToCombination nCurr, DL_LC(iDL), 1.5
-    'Next iDL
-    'For iLL = 0 To nLL - 1
-        'staad.Load.AddLoadAndFactorToCombination nCurr, LL_LC(iLL), 1.5
-    'Next iLL
-    'nGenerated = nGenerated + 1
-
-'------------------------------------------------------------------------------------------------------------------------------------------------------
-
 
     '==========================================================================
 ' C1 : 1.5 DL + Leading Live (LL / RL / CRL)
@@ -276,11 +227,6 @@ For iLead = 1 To 3
     If iLead = 2 And nRL = 0 Then GoTo SkipLead
     If iLead = 3 And nCRL = 0 Then GoTo SkipLead
 
-    'nCurr = nCurr + 1
-
-    '-------------------------------------------------
-    ' Build combination name dynamically
-    '-------------------------------------------------
     CombName = "1.5DL"
 
     If nLL > 0 Then
@@ -298,14 +244,6 @@ For iLead = 1 To 3
             CombName = CombName & " + 1.05RL"
         End If
     End If
-
-    'If nCRL > 0 Then
-        'If iLead = 3 Then
-            'CombName = CombName & " + 1.5CRL"
-        'Else
-            'CombName = CombName & " + 1.05CRL"
-        'End If
-    'End If
 
     '-------------------------------------------------
     ' IF Crane load
@@ -385,8 +323,6 @@ Else
     Next iRL
 End If
 
-    nGenerated = nGenerated + 1
-
 SkipLead:
 Next iLead
 
@@ -396,7 +332,7 @@ Next iLead
     ''==========================================================================
 
 
-Call GenerateLateralCombos(staad, nGenerated, _
+Call GenerateLateralCombos(staad, _
     nDL, nLL, nRL, nCRL, nWL, _
     DL_LC, LL_LC, RL_LC, CRL_LC, WL_LC, "WL", _
     1.2, _
@@ -406,7 +342,7 @@ Call GenerateLateralCombos(staad, nGenerated, _
     0.6)
 ' ← factors
 
-Call GenerateLateralCombos(staad, nGenerated, _
+Call GenerateLateralCombos(staad, _
     nDL, nLL, nRL, nCRL, nEQ, _
     DL_LC, LL_LC, RL_LC, CRL_LC, EQ_LC, "EL", _
     1.2, _
@@ -420,7 +356,7 @@ Call GenerateLateralCombos(staad, nGenerated, _
     ''      All DL cases combined with all LL cases  (one combined combination)
     ''==========================================================================
 
-Call GenerateLateralCombos(staad, nGenerated, _
+Call GenerateLateralCombos(staad, _
     nDL, nLL, nRL, nCRL, nWL, _
     DL_LC, LL_LC, RL_LC, CRL_LC, WL_LC, "WL", _
     1.2, _
@@ -430,7 +366,7 @@ Call GenerateLateralCombos(staad, nGenerated, _
     1.2)
 ' ← factors
 
-Call GenerateLateralCombos(staad, nGenerated, _
+Call GenerateLateralCombos(staad, _
     nDL, nLL, nRL, nCRL, nEQ, _
     DL_LC, LL_LC, RL_LC, CRL_LC, EQ_LC, "EL", _
     1.2, _
@@ -441,7 +377,7 @@ Call GenerateLateralCombos(staad, nGenerated, _
 
 
     '==========================================================================
-    ' C5 : 1.5 DL  +  1.5 WL   (one combination per wind direction)
+    ' C4 : 1.5 DL  +  1.5 WL   (one combination per wind direction)
     '==========================================================================
     For iWL = 0 To nWL - 1
         newComb = NextComb(staad)
@@ -451,11 +387,10 @@ Call GenerateLateralCombos(staad, nGenerated, _
             staad.Load.AddLoadAndFactorToCombination newComb, DL_LC(iDL), 1.5
         Next iDL
         staad.Load.AddLoadAndFactorToCombination newComb, WL_LC(iWL), 1.5
-        nGenerated = nGenerated + 1
     Next iWL
 
     '==========================================================================
-    ' C6 : 0.9 DL  +  1.5 WL   (one combination per wind direction)
+    ' C5 : 0.9 DL  +  1.5 WL   (one combination per wind direction)
     '==========================================================================
     For iWL = 0 To nWL - 1
         newComb = NextComb(staad)
@@ -465,11 +400,10 @@ Call GenerateLateralCombos(staad, nGenerated, _
             staad.Load.AddLoadAndFactorToCombination newComb, DL_LC(iDL), 0.9
         Next iDL
         staad.Load.AddLoadAndFactorToCombination newComb, WL_LC(iWL), 1.5
-        nGenerated = nGenerated + 1
     Next iWL
 
         '==========================================================================
-    ' C7 : 1.5 DL  +  1.5 EL   (one combination per wind direction)
+    ' C6 : 1.5 DL  +  1.5 EL   (one combination per wind direction)
     '==========================================================================
     For iEQ = 0 To nEQ - 1
         newComb = NextComb(staad)
@@ -479,11 +413,10 @@ Call GenerateLateralCombos(staad, nGenerated, _
             staad.Load.AddLoadAndFactorToCombination newComb, DL_LC(iDL), 1.5
         Next iDL
         staad.Load.AddLoadAndFactorToCombination newComb, EQ_LC(iEQ), 1.5
-        nGenerated = nGenerated + 1
     Next iEQ
 
     '==========================================================================
-    ' C8 : 0.9 DL  +  1.5 EL   (one combination per wind direction)
+    ' C7 : 0.9 DL  +  1.5 EL   (one combination per wind direction)
     '==========================================================================
     For iEQ = 0 To nEQ - 1
         newComb = NextComb(staad)
@@ -493,7 +426,6 @@ Call GenerateLateralCombos(staad, nGenerated, _
             staad.Load.AddLoadAndFactorToCombination newComb, DL_LC(iDL), 0.9
         Next iDL
         staad.Load.AddLoadAndFactorToCombination newComb, EQ_LC(iEQ), 1.5
-        nGenerated = nGenerated + 1
     Next iEQ
 
 
@@ -501,10 +433,9 @@ Call GenerateLateralCombos(staad, nGenerated, _
     gNextCombNum = nStartSLS   ' <-- reset counter for SLS loads
 
  '==========================================================================
-    ' C9 : 1 DL  +  1 LL
+    ' C8 : 1 DL  +  1 LL
     '      All DL cases combined with all LL cases  (one combined combination)
     '==========================================================================
-    'nCurr = nCurr + 1
     CombName = "1DL"
 
     If nLL > 0 Then
@@ -514,11 +445,6 @@ Call GenerateLateralCombos(staad, nGenerated, _
     If nRL > 0 Then
         CombName = CombName & " + 1RL"
     End If
-
-    'If nCRL > 0 Then
-            'CombName = CombName & " + 1CRL"
-    'End If
-    'CombName = "1DL + 1LL"
 
     If nCRL > 0 Then
     For iCRL = 0 To nCRL - 1
@@ -572,10 +498,8 @@ Else
 End If
 
 
-    nGenerated = nGenerated + 1
-
         '==========================================================================
-    ' C10 : 1 DL  + 0.8 LL + 0.8 WL
+    ' C9 : 1 DL  + 0.8 LL + 0.8 WL
     '      All DL cases combined with all WL cases  (one combined combination)
     '==========================================================================
 Call GenerateLateralCombosSLS(staad,  _
@@ -587,7 +511,7 @@ Call GenerateLateralCombosSLS(staad, _
     DL_LC, LL_LC, RL_LC, CRL_LC, EQ_LC, "EL")
 
         '==========================================================================
-    ' C12 : 1 DL  +  1 WL   (one combination per wind direction)
+    ' C10 : 1 DL  +  1 WL   (one combination per wind direction)
     '==========================================================================
     For iWL = 0 To nWL - 1
         newComb = NextComb(staad)
@@ -597,13 +521,12 @@ Call GenerateLateralCombosSLS(staad, _
             staad.Load.AddLoadAndFactorToCombination newComb, DL_LC(iDL), 1
         Next iDL
         staad.Load.AddLoadAndFactorToCombination newComb, WL_LC(iWL), 1
-        nGenerated = nGenerated + 1
     Next iWL
 
     '==========================================================================
     ' Done
     '==========================================================================
-    MsgBox nGenerated & " load combination(s) generated successfully." & Chr(13) & _
+    MsgBox "Load combination(s) generated successfully." & Chr(13) & _
        "Strength range starts : " & nStart & Chr(13) & _
        "Serviceability range starts : " & nStartSLS & Chr(13) & Chr(13) & _
        "Please verify the combinations in your STAAD.Pro model.", vbOkOnly
@@ -612,7 +535,6 @@ End Sub
 
 ' case with LL + WL/EL in strength
 Sub GenerateLateralCombos(staad As Object, _
-                           ByRef nGenerated As Long, _
                            nDL As Integer, nLL As Integer, nRL As Integer, nCRL As Integer, _
                            nLatLC As Integer, _
                            DL_LC() As Long, LL_LC() As Long, RL_LC() As Long, CRL_LC() As Long, _
@@ -696,8 +618,6 @@ Sub GenerateLateralCombos(staad As Object, _
             Next iWL
         End If
 
-        nGenerated = nGenerated + 1
-
 SkipLead:
     Next iLead
 
@@ -724,14 +644,6 @@ Sub GenerateLateralCombosSLS(staad As Object, _
     If nRL > 0 Then
         CombName = CombName & " + 0.8RL"
     End If
-
-    'If nCRL > 0 Then
-        'If iLead = 3 Then
-            'CombName = CombName & " + 1.2CRL"
-        'Else
-            'CombName = CombName & " + 1.05CRL"
-        'End If
-    'End If
 
     '-------------------------------------------------
     ' IF Crane load
@@ -796,12 +708,6 @@ Else
 End If
 End Sub
 
-'Function NextComb(staad As Object) As Long
-'
-    'NextComb = staad.Load.GetPrimaryLoadCaseCount + _
-               'staad.Load.GetLoadCombinationCaseCount + 1
-'
-'End Function
 Function NextComb(staad As Object) As Long
     NextComb = gNextCombNum
     gNextCombNum = gNextCombNum + 1
