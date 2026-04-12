@@ -102,9 +102,9 @@ Sub ShowCategoryDialog(staad As Object)
     ' Simple dialog - start number only
     '--------------------------------------------------------------------------
     Begin Dialog UserDialog 300, 120, "IS 800:2007 Combination Generator"
-        Text    20, 14, 180, 14, "Start ULS Combination Number:", .LblStart
+        Text    20, 14, 180, 14, "Start Strength Combination Number:", .LblStart
         TextBox 210, 11, 70, 21,                                  .TxtStart
-        Text    20, 44, 180, 14, "Start SLS Combination Number:", .LblSLS
+        Text    20, 44, 180, 14, "Start Serviceability Combination Number:", .LblSLS
         TextBox 210, 41, 70, 21,                                  .TxtSLS
         OKButton     60, 80, 80, 21
         CancelButton 160, 80, 80, 21
@@ -604,8 +604,8 @@ Call GenerateLateralCombosSLS(staad, _
     ' Done
     '==========================================================================
     MsgBox nGenerated & " load combination(s) generated successfully." & Chr(13) & _
-       "ULS range starts : " & nStart & Chr(13) & _
-       "SLS range starts : " & nStartSLS & Chr(13) & Chr(13) & _
+       "Strength range starts : " & nStart & Chr(13) & _
+       "Serviceability range starts : " & nStartSLS & Chr(13) & Chr(13) & _
        "Please verify the combinations in your STAAD.Pro model.", vbOkOnly
 
 End Sub
