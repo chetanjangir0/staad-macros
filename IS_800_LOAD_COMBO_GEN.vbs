@@ -171,8 +171,8 @@ Sub ShowCategoryDialog(staad As Object)
         End Select
     Next i
 
-    If nDL = 0 Or nRL = 0 Then
-        MsgBox "Auto-detection could not find both a Dead Load and Live Load case. Please check your load type assignments in STAAD.Pro.", vbOkOnly
+    If nDL = 0 Then
+        MsgBox "No Dead Load case detected. Please check load type assignments.", vbOkOnly
         Exit Sub
     End If
 
@@ -430,6 +430,8 @@ Call GenerateLateralCombos(staad, _
 
 
     '''''''''''''''''''''''''''''''''servicability'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+    Dim nEndULS As Long ' captures the last number of strength combo
+    nEndULS = gNextCombNum - 1
     gNextCombNum = nStartSLS   ' <-- reset counter for SLS loads
 
  '==========================================================================
@@ -527,9 +529,9 @@ Call GenerateLateralCombosSLS(staad, _
     ' Done
     '==========================================================================
     MsgBox "Load combination(s) generated successfully." & Chr(13) & _
-       "Strength range starts : " & nStart & Chr(13) & _
-       "Serviceability range starts : " & nStartSLS & Chr(13) & Chr(13) & _
-       "Please verify the combinations in your STAAD.Pro model.", vbOkOnly
+   "Strength    : " & nStart & " to " & nEndULS & Chr(13) & _
+   "Serviceability : " & nStartSLS & " to " & (gNextCombNum - 1) & Chr(13) & Chr(13) & _
+   "Please verify the combinations in your STAAD.Pro model.", vbOkOnly
 
 End Sub
 
