@@ -391,7 +391,7 @@ SkipLead:
 Next iLead
 
         ''==========================================================================
-    '' C2 : 1.2 DL  +  1.2 leading + 1.05 accomp + 0.6 WL
+    '' C2 : 1.2 DL  +  1.2 leading + 1.05 accomp + 0.6 WL/EL
     ''      All DL cases combined with all LL cases  (one combined combination)
     ''==========================================================================
 
@@ -416,138 +416,29 @@ Call GenerateLateralCombos(staad, nGenerated, _
     0.6)
 
         ''==========================================================================
-    '' C3 : 1.2 DL  +  1.2 leading + 0.53 accomp + 1.2 WL
+    '' C3 : 1.2 DL  +  1.2 leading + 0.53 accomp + 1.2 WL/EL
     ''      All DL cases combined with all LL cases  (one combined combination)
     ''==========================================================================
 
+Call GenerateLateralCombos(staad, nGenerated, _
+    nDL, nLL, nRL, nCRL, nWL, _
+    DL_LC, LL_LC, RL_LC, CRL_LC, WL_LC, "WL", _
+    1.2, _
+    1.2, 0.53, _
+    1.2, 0.53, _
+    1.2, 0.53, _
+    1.2)
+' ← factors
 
-For iLead = 1 To 3
+Call GenerateLateralCombos(staad, nGenerated, _
+    nDL, nLL, nRL, nCRL, nEQ, _
+    DL_LC, LL_LC, RL_LC, CRL_LC, EQ_LC, "EL", _
+    1.2, _
+    1.2, 0.53, _
+    1.2, 0.53, _
+    1.2, 0.53, _
+    1.2)
 
-    'Skip if that load type does not exist
-    If iLead = 1 And nLL = 0 Then GoTo SkipLead2
-    If iLead = 2 And nRL = 0 Then GoTo SkipLead2
-    If iLead = 3 And nCRL = 0 Then GoTo SkipLead2
-
-
-    '-------------------------------------------------
-    ' Build combination name dynamically
-    '-------------------------------------------------
-    CombName = "1.2DL"
-
-    If nLL > 0 Then
-        If iLead = 1 Then
-            CombName = CombName & " + 1.2LL"
-        Else
-            CombName = CombName & " + 0.53LL"
-        End If
-    End If
-
-    If nRL > 0 Then
-        If iLead = 2 Then
-            CombName = CombName & " + 1.2RL"
-        Else
-            CombName = CombName & " + 0.53RL"
-        End If
-    End If
-
-    'If nCRL > 0 Then
-        'If iLead = 3 Then
-            'CombName = CombName & " + 1.2CRL"
-        'Else
-            'CombName = CombName & " + 1.05CRL"
-        'End If
-    'End If
-
-    '-------------------------------------------------
-    ' IF Crane load
-    '-------------------------------------------------
-    If nCRL > 0 Then
-    For iCRL = 0 To nCRL - 1
-    For iWL = 0 To nWL - 1
-
-        newComb = NextComb(staad)
-        If iLead = 3 Then
-            staad.Load.CreateNewLoadCombination CombName & " + 1.2CRL" & iCRL + 1 & "+ 1.2WL" & iWL+1, newComb
-        Else
-            staad.Load.CreateNewLoadCombination CombName & " + 0.53CRL" & iCRL + 1 &  "+ 1.2WL" & iWL+1, newComb
-        End If
-
-
-        'DL
-        For iDL = 0 To nDL - 1
-            staad.Load.AddLoadAndFactorToCombination newComb, DL_LC(iDL), 1.2
-        Next iDL
-
-        'LL
-        For iLL = 0 To nLL - 1
-            If iLead = 1 Then
-                staad.Load.AddLoadAndFactorToCombination newComb, LL_LC(iLL), 1.2
-            Else
-                staad.Load.AddLoadAndFactorToCombination newComb, LL_LC(iLL), 0.53
-            End If
-        Next iLL
-
-        'RL
-        For iRL = 0 To nRL - 1
-            If iLead = 2 Then
-                staad.Load.AddLoadAndFactorToCombination newComb, RL_LC(iRL), 1.2
-            Else
-                staad.Load.AddLoadAndFactorToCombination newComb, RL_LC(iRL), 0.53
-            End If
-        Next iRL
-
-        'Single crane load
-        If iLead = 3 Then
-            staad.Load.AddLoadAndFactorToCombination newComb, CRL_LC(iCRL), 1.2
-        Else
-            staad.Load.AddLoadAndFactorToCombination newComb, CRL_LC(iCRL), 0.53
-        End If
-
-        'Wind Load
-        staad.Load.AddLoadAndFactorToCombination newComb, WL_LC(iWL), 1.2
-    Next iWL
-    Next iCRL
-Else
-    For iWL = 0 To nWL - 1
-        newComb = NextComb(staad)
-        staad.Load.CreateNewLoadCombination CombName & "+ 1.2WL" & iWL+1, newComb
-    
-        '-------------------------------------------------
-        ' Dead loads
-        '-------------------------------------------------
-        For iDL = 0 To nDL - 1
-            staad.Load.AddLoadAndFactorToCombination newComb, DL_LC(iDL), 1.2
-        Next iDL
-    
-        '-------------------------------------------------
-        ' Live load
-        '-------------------------------------------------
-        For iLL = 0 To nLL - 1
-            If iLead = 1 Then
-                staad.Load.AddLoadAndFactorToCombination newComb, LL_LC(iLL), 1.2
-            Else
-                staad.Load.AddLoadAndFactorToCombination newComb, LL_LC(iLL), 0.53
-            End If
-        Next iLL
-    
-        '-------------------------------------------------
-        ' Roof live
-        '-------------------------------------------------
-        For iRL = 0 To nRL - 1
-            If iLead = 2 Then
-                staad.Load.AddLoadAndFactorToCombination newComb, RL_LC(iRL), 1.2
-            Else
-                staad.Load.AddLoadAndFactorToCombination newComb, RL_LC(iRL), 0.53
-            End If
-        Next iRL
-        staad.Load.AddLoadAndFactorToCombination newComb, WL_LC(iWL), 1.2
-    Next iWL
-End If
-
-    nGenerated = nGenerated + 1
-
-SkipLead2:
-Next iLead
 
     '==========================================================================
     ' C5 : 1.5 DL  +  1.5 WL   (one combination per wind direction)
