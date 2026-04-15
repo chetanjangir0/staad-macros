@@ -228,6 +228,9 @@ For iLead = 1 To 3
     If iLead = 3 And nCRL = 0 Then GoTo SkipLead
 
     CombName = "1.5DL"
+    If nDL > 1 Then
+        CombName="1.5DL + 1.5CL"
+    End If
 
     If nLL > 0 Then
         If iLead = 1 Then
@@ -382,6 +385,9 @@ Call GenerateLateralCombos(staad, _
     For iWL = 0 To nWL - 1
         newComb = NextComb(staad)
         CombName = "1.5 DL + 1.5 WL" & iWL+1 & ""
+        If nDL > 1 Then
+            CombName = "1.5 DL + 1.5 CL + 1.5 WL" & iWL+1 & ""
+        End If
         staad.Load.CreateNewLoadCombination CombName, newComb
         For iDL = 0 To nDL - 1
             staad.Load.AddLoadAndFactorToCombination newComb, DL_LC(iDL), 1.5
@@ -395,6 +401,9 @@ Call GenerateLateralCombos(staad, _
     For iWL = 0 To nWL - 1
         newComb = NextComb(staad)
         CombName = "0.9 DL + 1.5 WL" & iWL+1 & ""
+        If nDL >1 Then
+            CombName = "0.9 DL + 0.9 CL + 1.5 WL" & iWL+1 & ""
+        End If
         staad.Load.CreateNewLoadCombination CombName, newComb
         For iDL = 0 To nDL - 1
             staad.Load.AddLoadAndFactorToCombination newComb, DL_LC(iDL), 0.9
@@ -408,6 +417,9 @@ Call GenerateLateralCombos(staad, _
     For iEQ = 0 To nEQ - 1
         newComb = NextComb(staad)
         CombName = "1.5 DL + 1.5 EL" & iEQ+1 & ""
+        If nDL >1 Then
+            CombName = "1.5 DL + 1.5 CL + 1.5 EL" & iEQ+1 & ""
+        End If
         staad.Load.CreateNewLoadCombination CombName, newComb
         For iDL = 0 To nDL - 1
             staad.Load.AddLoadAndFactorToCombination newComb, DL_LC(iDL), 1.5
@@ -421,6 +433,9 @@ Call GenerateLateralCombos(staad, _
     For iEQ = 0 To nEQ - 1
         newComb = NextComb(staad)
         CombName = "0.9 DL + 1.5 EL" & iEQ+1 & ""
+        If nDL >1 Then
+            CombName = "0.9 DL + 0.9 CL+ 1.5 EL" & iEQ+1 & ""
+        End If
         staad.Load.CreateNewLoadCombination CombName, newComb
         For iDL = 0 To nDL - 1
             staad.Load.AddLoadAndFactorToCombination newComb, DL_LC(iDL), 0.9
@@ -439,6 +454,9 @@ Call GenerateLateralCombos(staad, _
     '      All DL cases combined with all LL cases  (one combined combination)
     '==========================================================================
     CombName = "1DL"
+    If nDL >1 Then
+            CombName = "1DL + 1CL"
+    End If
 
     If nLL > 0 Then
         CombName = CombName & " + 1LL"
@@ -518,6 +536,9 @@ Call GenerateLateralCombosSLS(staad, _
     For iWL = 0 To nWL - 1
         newComb = NextComb(staad)
         CombName = "1 DL + 1 WL" & iWL+1 & ""
+        If nDL >1 Then
+            CombName = "1 DL + 1CL + 1 WL" & iWL+1 & ""
+        End If
         staad.Load.CreateNewLoadCombination CombName, newComb
         For iDL = 0 To nDL - 1
             staad.Load.AddLoadAndFactorToCombination newComb, DL_LC(iDL), 1
@@ -565,6 +586,10 @@ Sub GenerateLateralCombos(staad As Object, _
 
         ' ── Build base name ───────────────────────────────────────────
         CombName = fDL & "DL"
+
+        If nDL >1 Then
+            CombName = fDL & "DL +" & fDL & "CL"
+        End If
 
         If nLL > 0 Then
             CombName = CombName & IIf(iLead = 1, " + " & fLL_lead & "LL", " + " & fLL_acc & "LL")
@@ -638,6 +663,9 @@ Sub GenerateLateralCombosSLS(staad As Object, _
     Dim newComb As Long
 
     CombName = "1DL"
+     If nDL >1 Then
+        CombName = "1DL + 1CL"
+    End If
 
     If nLL > 0 Then
         CombName = CombName & " + 0.8LL"
