@@ -67,6 +67,7 @@ Sub ShowCategoryDialog(staad As Object)
             Case 3  : nCatChoice(i) = 3   ' Wind
             Case 4  : nCatChoice(i) = 4   ' Seismic
             Case 2  : nCatChoice(i) = 5   ' Roof Live
+            Case 19 : nCatChoice(i) = 6   ' Crane Load   ' <-- ADDED
             Case Else : nCatChoice(i) = 0
         End Select
     Next i
@@ -84,6 +85,7 @@ Sub ShowCategoryDialog(staad As Object)
             Case 3 : sCat = "Wind Load"
             Case 4 : sCat = "Seismic"
             Case 5 : sCat = "Roof Live"
+            Case 6 : sCat = "Crane Load"   ' <-- ADDED
             Case Else : sCat = "(Skip)"
         End Select
         sInfo = sInfo & "  LC" & nLCNums(i) & "  ->  " & sCat & Chr(13)
@@ -134,9 +136,12 @@ Sub ShowCategoryDialog(staad As Object)
     ReDim EQ_Lbl(nPrimary)
     Dim RL_LC() As Long
     ReDim RL_LC(nPrimary)
+    Dim CR_LC() As Long                ' <-- ADDED
+    ReDim CR_LC(nPrimary)              ' <-- ADDED
 
     Dim nDL As Integer, nLL As Integer, nWL As Integer, nEQ As Integer, nRL As Integer
-    nDL = 0 : nLL = 0 : nWL = 0 : nEQ = 0 : nRL = 0
+    Dim nCR As Integer                 ' <-- ADDED
+    nDL = 0 : nLL = 0 : nWL = 0 : nEQ = 0 : nRL = 0 : nCR = 0   ' <-- nCR = 0 ADDED
 
     For i = 0 To nPrimary - 1
         Select Case nCatChoice(i)
@@ -157,6 +162,9 @@ Sub ShowCategoryDialog(staad As Object)
             Case 5
                 RL_LC(nRL) = nLCNums(i)
                 nRL = nRL + 1
+            Case 6                             ' <-- ADDED
+                CR_LC(nCR) = nLCNums(i)        ' <-- ADDED
+                nCR = nCR + 1                  ' <-- ADDED
         End Select
     Next i
 
@@ -172,6 +180,7 @@ Sub ShowCategoryDialog(staad As Object)
         nWL, WL_LC(), WL_Lbl(), _
         nEQ, EQ_LC(), EQ_Lbl(), _
         nRL, RL_LC(), _
+        nCR, CR_LC(), _                ' <-- ADDED
         nStartComb, _
         nStartSLS
 
@@ -182,12 +191,18 @@ End Sub
 '
 ' STRENGTH:
 '  1.  1.4 DL
-'  2.  1.2 DL + 1.6 LL + 0.5 RL
-'  3.  1.2 DL + 1 LL + 1.6 RL
+'  2.  1.2 DL + 1.6 LL + 0.5 RL                        (no crane)
+'      1.2 DL + 1.6 LL + 0.5 RL + 1.6 CRn              (per crane if crane exists)
+'  3.  1.2 DL + 1 LL + 1.6 RL                           (no crane)
+'      1.2 DL + 1 LL + 1.6 RL + 1.6 CRn                (per crane if crane exists)
 '  4.  1.2 DL + 1.6 RL + 0.5 WL      (looped over each WL case)
-'  5.  1.2 DL + 1 LL + 0.5 RL + 1 WL (looped over each WL case)
+'  5.  1.2 DL + 1 LL + 0.5 RL + 1 WL                   (no crane)
+'      1.2 DL + 1 LL + 0.5 RL + 1 WL + 1.6 CRn         (per crane if crane exists)
+'      (looped over each WL case)
 '  6.  0.9 DL + 1 WL                  (looped over each WL case)
-'  7.  1.2 DL + 1 LL + 1 EL           (looped over each EL case)
+'  7.  1.2 DL + 1 LL + 1 EL                             (no crane)
+'      1.2 DL + 1 LL + 1 EL + 1.6 CRn                  (per crane if crane exists)
+'      (looped over each EL case)
 '  8.  0.9 DL + 1 EL                  (looped over each EL case)
 '
 ' SERVICEABILITY:
@@ -202,11 +217,13 @@ Sub GenerateCombinations(staad As Object, _
     nWL As Integer, WL_LC() As Long, WL_Lbl() As String, _
     nEQ As Integer, EQ_LC() As Long, EQ_Lbl() As String, _
     nRL As Integer, RL_LC() As Long, _
+    nCR As Integer, CR_LC() As Long, _   ' <-- ADDED
     nStart As Integer, _
     nStartSLS As Integer)
 
     Dim newComb As Long
     Dim iDL As Integer, iLL As Integer, iWL As Integer, iEQ As Integer, iRL As Integer
+    Dim iCR As Integer                   ' <-- ADDED
     Dim CombName As String
 
     '##########################################################################
@@ -225,9 +242,13 @@ Sub GenerateCombinations(staad As Object, _
     Next iDL
 
     '==========================================================================
-    ' S2 : 1.2 DL + 1.6 LL + 0.5 RL
+    ' S2 : 1.2 DL + 1.6 LL + 0.5 RL                    (no crane)
+    '      1.2 DL + 1.6 LL + 0.5 RL + 1.6 CRn          (per crane if crane exists)
     '==========================================================================
     If nLL > 0 Or nRL > 0 Then
+        ' Base combo: 1.2 DL + 1.6 LL + 0.5 RL
+        If nCR > 0 Then GoTo SkipS2Base
+
         newComb = NextComb(staad)
         CombName = "1.2 DL"
         If nDL > 1 Then CombName = "1.2 DL + 1.2 CL"
@@ -243,12 +264,38 @@ Sub GenerateCombinations(staad As Object, _
         For iRL = 0 To nRL - 1
             staad.Load.AddLoadAndFactorToCombination newComb, RL_LC(iRL), 0.5
         Next iRL
+
+        SkipS2Base:
+        ' Per-crane combos: 1.2 DL + 1.6 LL + 0.5 RL + 1.6 CRn
+        For iCR = 0 To nCR - 1
+            newComb = NextComb(staad)
+            CombName = "1.2 DL"
+            If nDL > 1 Then CombName = "1.2 DL + 1.2 CL"
+            If nLL > 0 Then CombName = CombName & " + 1.6 LL"
+            If nRL > 0 Then CombName = CombName & " + 0.5 RL"
+            CombName = CombName & " + 1.6 CR" & (iCR + 1)
+            staad.Load.CreateNewLoadCombination CombName, newComb
+            For iDL = 0 To nDL - 1
+                staad.Load.AddLoadAndFactorToCombination newComb, DL_LC(iDL), 1.2
+            Next iDL
+            For iLL = 0 To nLL - 1
+                staad.Load.AddLoadAndFactorToCombination newComb, LL_LC(iLL), 1.6
+            Next iLL
+            For iRL = 0 To nRL - 1
+                staad.Load.AddLoadAndFactorToCombination newComb, RL_LC(iRL), 0.5
+            Next iRL
+            staad.Load.AddLoadAndFactorToCombination newComb, CR_LC(iCR), 1.6
+        Next iCR
     End If
 
     '==========================================================================
-    ' S3 : 1.2 DL + 1 LL + 1.6 RL
+    ' S3 : 1.2 DL + 1 LL + 1.6 RL                       (no crane)
+    '      1.2 DL + 1 LL + 1.6 RL + 1 CRn             (per crane if crane exists)
     '==========================================================================
-    If nLL >0 Or nRL > 0 Then
+    If nLL > 0 Or nRL > 0 Then
+        ' Base combo: 1.2 DL + 1 LL + 1.6 RL
+        If nCR > 0 Then GoTo SkipS3Base
+
         newComb = NextComb(staad)
         CombName = "1.2 DL"
         If nDL > 1 Then CombName = "1.2 DL + 1.2 CL"
@@ -264,40 +311,86 @@ Sub GenerateCombinations(staad As Object, _
         For iRL = 0 To nRL - 1
             staad.Load.AddLoadAndFactorToCombination newComb, RL_LC(iRL), 1.6
         Next iRL
+
+        SkipS3Base:
+        ' Per-crane combos: 1.2 DL + 1 LL + 1.6 RL + 1 CRn
+        For iCR = 0 To nCR - 1
+            newComb = NextComb(staad)
+            CombName = "1.2 DL"
+            If nDL > 1 Then CombName = "1.2 DL + 1.2 CL"
+            If nLL > 0 Then CombName = CombName & " + 1 LL"
+            If nRL > 0 Then CombName = CombName & " + 1.6 RL"
+            CombName = CombName & " + 1 CR" & (iCR + 1)
+            staad.Load.CreateNewLoadCombination CombName, newComb
+            For iDL = 0 To nDL - 1
+                staad.Load.AddLoadAndFactorToCombination newComb, DL_LC(iDL), 1.2
+            Next iDL
+            For iLL = 0 To nLL - 1
+                staad.Load.AddLoadAndFactorToCombination newComb, LL_LC(iLL), 1
+            Next iLL
+            For iRL = 0 To nRL - 1
+                staad.Load.AddLoadAndFactorToCombination newComb, RL_LC(iRL), 1.6
+            Next iRL
+            staad.Load.AddLoadAndFactorToCombination newComb, CR_LC(iCR), 1
+        Next iCR
     End If
 
     '==========================================================================
     ' S4 : 1.2 DL + 1.6 RL + 0.5 WL   (looped over each WL direction)
     '==========================================================================
-
-        For iWL = 0 To nWL - 1
-            newComb = NextComb(staad)
-            CombName = "1.2 DL"
-            If nDL > 1 Then CombName = "1.2 DL + 1.2 CL"
-            If nRL > 0 Then CombName = CombName & " + 1.6 RL"
-            CombName = CombName & " + 0.5 WL" & (iWL + 1)
-            staad.Load.CreateNewLoadCombination CombName, newComb
-            For iDL = 0 To nDL - 1
-                staad.Load.AddLoadAndFactorToCombination newComb, DL_LC(iDL), 1.2
-            Next iDL
-            For iRL = 0 To nRL - 1
-                staad.Load.AddLoadAndFactorToCombination newComb, RL_LC(iRL), 1.6
-            Next iRL
-            staad.Load.AddLoadAndFactorToCombination newComb, WL_LC(iWL), 0.5
-        Next iWL
-
+    For iWL = 0 To nWL - 1
+        newComb = NextComb(staad)
+        CombName = "1.2 DL"
+        If nDL > 1 Then CombName = "1.2 DL + 1.2 CL"
+        If nRL > 0 Then CombName = CombName & " + 1.6 RL"
+        CombName = CombName & " + 0.5 WL" & (iWL + 1)
+        staad.Load.CreateNewLoadCombination CombName, newComb
+        For iDL = 0 To nDL - 1
+            staad.Load.AddLoadAndFactorToCombination newComb, DL_LC(iDL), 1.2
+        Next iDL
+        For iRL = 0 To nRL - 1
+            staad.Load.AddLoadAndFactorToCombination newComb, RL_LC(iRL), 1.6
+        Next iRL
+        staad.Load.AddLoadAndFactorToCombination newComb, WL_LC(iWL), 0.5
+    Next iWL
 
     '==========================================================================
-    ' S5 : 1.2 DL + 1 LL + 0.5 RL + 1 WL   (looped over each WL direction)
+    ' S5 : 1.2 DL + 1 LL + 0.5 RL + 1 WL               (no crane)
+    '      1.2 DL + 1 LL + 0.5 RL + 1 WL + 1 CRn     (per crane if crane exists)
+    '      (looped over each WL direction)
     '==========================================================================
+    For iWL = 0 To nWL - 1
+        ' Base combo
+        If nCR > 0 Then GoTo SkipS5Base
 
-        For iWL = 0 To nWL - 1
+        newComb = NextComb(staad)
+        CombName = "1.2 DL"
+        If nDL > 1 Then CombName = "1.2 DL + 1.2 CL"
+        If nLL > 0 Then CombName = CombName & " + 1 LL"
+        If nRL > 0 Then CombName = CombName & " + 0.5 RL"
+        CombName = CombName & " + 1 WL" & (iWL + 1)
+        staad.Load.CreateNewLoadCombination CombName, newComb
+        For iDL = 0 To nDL - 1
+            staad.Load.AddLoadAndFactorToCombination newComb, DL_LC(iDL), 1.2
+        Next iDL
+        For iLL = 0 To nLL - 1
+            staad.Load.AddLoadAndFactorToCombination newComb, LL_LC(iLL), 1
+        Next iLL
+        For iRL = 0 To nRL - 1
+            staad.Load.AddLoadAndFactorToCombination newComb, RL_LC(iRL), 0.5
+        Next iRL
+        staad.Load.AddLoadAndFactorToCombination newComb, WL_LC(iWL), 1
+
+        SkipS5Base:
+        ' Per-crane combos: base + 1 CRn
+        For iCR = 0 To nCR - 1
             newComb = NextComb(staad)
             CombName = "1.2 DL"
             If nDL > 1 Then CombName = "1.2 DL + 1.2 CL"
             If nLL > 0 Then CombName = CombName & " + 1 LL"
             If nRL > 0 Then CombName = CombName & " + 0.5 RL"
             CombName = CombName & " + 1 WL" & (iWL + 1)
+            CombName = CombName & " + 1 CR" & (iCR + 1)
             staad.Load.CreateNewLoadCombination CombName, newComb
             For iDL = 0 To nDL - 1
                 staad.Load.AddLoadAndFactorToCombination newComb, DL_LC(iDL), 1.2
@@ -309,8 +402,9 @@ Sub GenerateCombinations(staad As Object, _
                 staad.Load.AddLoadAndFactorToCombination newComb, RL_LC(iRL), 0.5
             Next iRL
             staad.Load.AddLoadAndFactorToCombination newComb, WL_LC(iWL), 1
-        Next iWL
-
+            staad.Load.AddLoadAndFactorToCombination newComb, CR_LC(iCR), 1
+        Next iCR
+    Next iWL
 
     '==========================================================================
     ' S6 : 0.9 DL + 1 WL   (looped over each WL direction)
@@ -328,15 +422,37 @@ Sub GenerateCombinations(staad As Object, _
     Next iWL
 
     '==========================================================================
-    ' S7 : 1.2 DL + 1 LL + 1 EL   (looped over each EL case)
+    ' S7 : 1.2 DL + 1 LL + 1 EL                         (no crane)
+    '      1.2 DL + 1 LL + 1 EL + 1 CRn               (per crane if crane exists)
+    '      (looped over each EL case)
     '==========================================================================
+    For iEQ = 0 To nEQ - 1
+        ' Base combo
+        If nCR > 0 Then GoTo SkipS7Base
 
-        For iEQ = 0 To nEQ - 1
+        newComb = NextComb(staad)
+        CombName = "1.2 DL"
+        If nDL > 1 Then CombName = "1.2 DL + 1.2 CL"
+        If nLL > 0 Then CombName = CombName & " + 1 LL"
+        CombName = CombName & " + 1 EL" & (iEQ + 1)
+        staad.Load.CreateNewLoadCombination CombName, newComb
+        For iDL = 0 To nDL - 1
+            staad.Load.AddLoadAndFactorToCombination newComb, DL_LC(iDL), 1.2
+        Next iDL
+        For iLL = 0 To nLL - 1
+            staad.Load.AddLoadAndFactorToCombination newComb, LL_LC(iLL), 1
+        Next iLL
+        staad.Load.AddLoadAndFactorToCombination newComb, EQ_LC(iEQ), 1
+
+        SkipS7Base:
+        ' Per-crane combos: base + 1 CRn
+        For iCR = 0 To nCR - 1
             newComb = NextComb(staad)
             CombName = "1.2 DL"
             If nDL > 1 Then CombName = "1.2 DL + 1.2 CL"
             If nLL > 0 Then CombName = CombName & " + 1 LL"
             CombName = CombName & " + 1 EL" & (iEQ + 1)
+            CombName = CombName & " + 1 CR" & (iCR + 1)
             staad.Load.CreateNewLoadCombination CombName, newComb
             For iDL = 0 To nDL - 1
                 staad.Load.AddLoadAndFactorToCombination newComb, DL_LC(iDL), 1.2
@@ -345,8 +461,9 @@ Sub GenerateCombinations(staad As Object, _
                 staad.Load.AddLoadAndFactorToCombination newComb, LL_LC(iLL), 1
             Next iLL
             staad.Load.AddLoadAndFactorToCombination newComb, EQ_LC(iEQ), 1
-        Next iEQ
-
+            staad.Load.AddLoadAndFactorToCombination newComb, CR_LC(iCR), 1
+        Next iCR
+    Next iEQ
 
     '==========================================================================
     ' S8 : 0.9 DL + 1 EL   (looped over each EL case)
@@ -388,9 +505,12 @@ Sub GenerateCombinations(staad As Object, _
     End If
 
     '==========================================================================
-    ' SLS2 : 1 DL + 1 LL
+    ' SLS2 : 1 DL + 1 LL (no crane)
+    '             1DL + 1 LL + 1CR (per crane if crane exists)
     '==========================================================================
     If nLL > 0 Then
+        ' base combo 
+        If nCR > 0 Then GoTo SkipS8Base
         newComb = NextComb(staad)
         CombName = "1 DL"
         If nDL > 1 Then CombName = "1 DL + 1 CL"
@@ -402,6 +522,24 @@ Sub GenerateCombinations(staad As Object, _
         For iLL = 0 To nLL - 1
             staad.Load.AddLoadAndFactorToCombination newComb, LL_LC(iLL), 1
         Next iLL
+
+        SkipS8Base:
+        ' Per-crane combos: 1 DL + 1 LL + 1 CRn
+        For iCR = 0 To nCR - 1
+            newComb = NextComb(staad)
+            CombName = "1 DL"
+            If nDL > 1 Then CombName = "1 DL + 1 CL"
+            If nLL > 0 Then CombName = CombName & " + 1 LL"
+            CombName = CombName & " + 1 CR" & (iCR + 1)
+            staad.Load.CreateNewLoadCombination CombName, newComb
+            For iDL = 0 To nDL - 1
+                staad.Load.AddLoadAndFactorToCombination newComb, DL_LC(iDL), 1
+            Next iDL
+            For iLL = 0 To nLL - 1
+                staad.Load.AddLoadAndFactorToCombination newComb, LL_LC(iLL), 1
+            Next iLL
+            staad.Load.AddLoadAndFactorToCombination newComb, CR_LC(iCR), 1
+        Next iCR
     End If
 
     '==========================================================================

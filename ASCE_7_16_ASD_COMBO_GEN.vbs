@@ -35,9 +35,6 @@ End Sub
 '==============================================================================
 Sub ShowCategoryDialog(staad As Object)
 
-    '--------------------------------------------------------------------------
-    ' Read all primary load cases from the model
-    '--------------------------------------------------------------------------
     Dim nPrimary As Long
     nPrimary = staad.Load.GetPrimaryLoadCaseCount()
 
@@ -50,9 +47,6 @@ Sub ShowCategoryDialog(staad As Object)
     ReDim nLCNums(nPrimary - 1)
     staad.Load.GetPrimaryLoadCaseNumbers nLCNums()
 
-    '--------------------------------------------------------------------------
-    ' Auto-detect categories
-    '--------------------------------------------------------------------------
     Dim nCatChoice() As Integer
     ReDim nCatChoice(nPrimary - 1)
     Dim i As Integer
@@ -67,13 +61,11 @@ Sub ShowCategoryDialog(staad As Object)
             Case 3  : nCatChoice(i) = 3   ' Wind
             Case 4  : nCatChoice(i) = 4   ' Seismic
             Case 2  : nCatChoice(i) = 5   ' Roof Live
+            Case 19 : nCatChoice(i) = 6   ' Crane Load
             Case Else : nCatChoice(i) = 0
         End Select
     Next i
 
-    '--------------------------------------------------------------------------
-    ' Show detected load cases summary
-    '--------------------------------------------------------------------------
     Dim sInfo As String
     sInfo = "Load cases detected:" & Chr(13)
     For i = 0 To nPrimary - 1
@@ -84,15 +76,13 @@ Sub ShowCategoryDialog(staad As Object)
             Case 3 : sCat = "Wind Load"
             Case 4 : sCat = "Seismic"
             Case 5 : sCat = "Roof Live"
+            Case 6 : sCat = "Crane Load"
             Case Else : sCat = "(Skip)"
         End Select
         sInfo = sInfo & "  LC" & nLCNums(i) & "  ->  " & sCat & Chr(13)
     Next i
     MsgBox sInfo, vbOkOnly, "Auto-Detected Categories"
 
-    '--------------------------------------------------------------------------
-    ' Simple dialog - start number only
-    '--------------------------------------------------------------------------
     Begin Dialog UserDialog 300, 95, "Load Combination Generator"
         Text    20, 14, 180, 14, "Start Combination Number:", .LblStart
         TextBox 210, 11, 70, 21,                              .TxtStart
@@ -111,9 +101,6 @@ Sub ShowCategoryDialog(staad As Object)
     nStartComb = CInt(Val(dlg.TxtStart))
     If nStartComb < 1 Then nStartComb = 101
 
-    '--------------------------------------------------------------------------
-    ' Sort load cases into category buckets
-    '--------------------------------------------------------------------------
     Dim DL_LC() As Long
     ReDim DL_LC(nPrimary)
     Dim LL_LC() As Long
@@ -128,29 +115,20 @@ Sub ShowCategoryDialog(staad As Object)
     ReDim EQ_Lbl(nPrimary)
     Dim RL_LC() As Long
     ReDim RL_LC(nPrimary)
+    Dim CR_LC() As Long
+    ReDim CR_LC(nPrimary)
 
-    Dim nDL As Integer, nLL As Integer, nWL As Integer, nEQ As Integer, nRL As Integer
-    nDL = 0 : nLL = 0 : nWL = 0 : nEQ = 0 : nRL = 0
+    Dim nDL As Integer, nLL As Integer, nWL As Integer, nEQ As Integer, nRL As Integer, nCR As Integer
+    nDL = 0 : nLL = 0 : nWL = 0 : nEQ = 0 : nRL = 0 : nCR = 0
 
     For i = 0 To nPrimary - 1
         Select Case nCatChoice(i)
-            Case 1
-                DL_LC(nDL) = nLCNums(i)
-                nDL = nDL + 1
-            Case 2
-                LL_LC(nLL) = nLCNums(i)
-                nLL = nLL + 1
-            Case 3
-                WL_LC(nWL) = nLCNums(i)
-                WL_Lbl(nWL) = "LC" & nLCNums(i)
-                nWL = nWL + 1
-            Case 4
-                EQ_LC(nEQ) = nLCNums(i)
-                EQ_Lbl(nEQ) = "LC" & nLCNums(i)
-                nEQ = nEQ + 1
-            Case 5
-                RL_LC(nRL) = nLCNums(i)
-                nRL = nRL + 1
+            Case 1 : DL_LC(nDL) = nLCNums(i) : nDL = nDL + 1
+            Case 2 : LL_LC(nLL) = nLCNums(i) : nLL = nLL + 1
+            Case 3 : WL_LC(nWL) = nLCNums(i) : WL_Lbl(nWL) = "LC" & nLCNums(i) : nWL = nWL + 1
+            Case 4 : EQ_LC(nEQ) = nLCNums(i) : EQ_Lbl(nEQ) = "LC" & nLCNums(i) : nEQ = nEQ + 1
+            Case 5 : RL_LC(nRL) = nLCNums(i) : nRL = nRL + 1
+            Case 6 : CR_LC(nCR) = nLCNums(i) : nCR = nCR + 1
         End Select
     Next i
 
@@ -166,6 +144,7 @@ Sub ShowCategoryDialog(staad As Object)
         nWL, WL_LC(), WL_Lbl(), _
         nEQ, EQ_LC(), EQ_Lbl(), _
         nRL, RL_LC(), _
+        nCR, CR_LC(), _
         nStartComb
 
 End Sub
@@ -174,15 +153,19 @@ End Sub
 ' STEP 2 : Create all load combinations in STAAD.Pro
 '
 '  1.  1 DL
-'  2.  1 DL + 1 LL
+'  2.  1 DL + 1 LL                                     (no crane)
+'      1 DL + 1 LL + 1 CRn                             (per crane if crane exists)
 '  3.  1 DL + 1 RL
-'  4.  1 DL + 0.75 LL + 0.75 RL
-'  5.  1 DL + 0.6 WL              (looped over each WL case)
-'  6.  1 DL + 0.75 LL + 0.75 RL + 0.45 WL  (looped over each WL case)
-'  7.  0.6 DL + 0.6 WL            (looped over each WL case)
-'  8.  1 DL + 0.7 EL              (looped over each EL case)
-'  9.  1 DL + 0.75 LL + 0.525 EL  (looped over each EL case)
-' 10.  0.6 DL + 0.7 EL            (looped over each EL case)
+'  4.  1 DL + 0.75 LL + 0.75 RL                        (no crane)
+'      1 DL + 0.75 LL + 0.75 RL + 0.75 CRn            (per crane if crane exists)
+'  5.  1 DL + 0.6 WL
+'  6.  1 DL + 0.75 LL + 0.75 RL + 0.45 WL             (no crane)
+'      1 DL + 0.75 LL + 0.75 RL + 0.45 WL + 0.75 CRn (per crane if crane exists)
+'  7.  0.6 DL + 0.6 WL
+'  8.  1 DL + 0.7 EL
+'  9.  1 DL + 0.75 LL + 0.525 EL                       (no crane)
+'      1 DL + 0.75 LL + 0.525 EL + 0.75 CRn           (per crane if crane exists)
+' 10.  0.6 DL + 0.7 EL
 '==============================================================================
 Sub GenerateCombinations(staad As Object, _
     nDL As Integer, DL_LC() As Long, _
@@ -190,16 +173,12 @@ Sub GenerateCombinations(staad As Object, _
     nWL As Integer, WL_LC() As Long, WL_Lbl() As String, _
     nEQ As Integer, EQ_LC() As Long, EQ_Lbl() As String, _
     nRL As Integer, RL_LC() As Long, _
+    nCR As Integer, CR_LC() As Long, _
     nStart As Integer)
 
     Dim newComb As Long
-    Dim iDL As Integer, iLL As Integer, iWL As Integer, iEQ As Integer, iRL As Integer
+    Dim iDL As Integer, iLL As Integer, iWL As Integer, iEQ As Integer, iRL As Integer, iCR As Integer
     Dim CombName As String
-
-    '--------------------------------------------------------------------------
-    ' Helper: build the "DL" part of a label, using CL tag when nDL > 1
-    '--------------------------------------------------------------------------
-    ' (inline where needed)
 
     '==========================================================================
     ' C1 : 1 DL
@@ -213,9 +192,13 @@ Sub GenerateCombinations(staad As Object, _
     Next iDL
 
     '==========================================================================
-    ' C2 : 1 DL + 1 LL
+    ' C2 : 1 DL + 1 LL                 (no crane)
+    '      1 DL + 1 LL + 1 CRn         (per crane if crane exists)
     '==========================================================================
     If nLL > 0 Then
+        ' Base combo: 1 DL + 1 LL
+        If nCR > 0 Then GoTo SkipLL1
+
         newComb = NextComb(staad)
         CombName = "1 DL"
         If nDL > 1 Then CombName = "1 DL + 1 CL"
@@ -227,6 +210,23 @@ Sub GenerateCombinations(staad As Object, _
         For iLL = 0 To nLL - 1
             staad.Load.AddLoadAndFactorToCombination newComb, LL_LC(iLL), 1
         Next iLL
+
+        SkipLL1:
+        ' Per-crane combos: 1 DL + 1 LL + 1 CRn
+        For iCR = 0 To nCR - 1
+            newComb = NextComb(staad)
+            CombName = "1 DL"
+            If nDL > 1 Then CombName = "1 DL + 1 CL"
+            CombName = CombName & " + 1 LL + 1 CR" & (iCR + 1)
+            staad.Load.CreateNewLoadCombination CombName, newComb
+            For iDL = 0 To nDL - 1
+                staad.Load.AddLoadAndFactorToCombination newComb, DL_LC(iDL), 1
+            Next iDL
+            For iLL = 0 To nLL - 1
+                staad.Load.AddLoadAndFactorToCombination newComb, LL_LC(iLL), 1
+            Next iLL
+            staad.Load.AddLoadAndFactorToCombination newComb, CR_LC(iCR), 1
+        Next iCR
     End If
 
     '==========================================================================
@@ -247,18 +247,18 @@ Sub GenerateCombinations(staad As Object, _
     End If
 
     '==========================================================================
-    ' C4 : 1 DL + 0.75 LL + 0.75 RL
+    ' C4 : 1 DL + 0.75 LL + 0.75 RL                    (no crane)
+    '      1 DL + 0.75 LL + 0.75 RL + 0.75 CRn         (per crane if crane exists)
     '==========================================================================
     If nLL > 0 Or nRL > 0 Then
+        ' Base combo: 1 DL + 0.75 LL + 0.75 RL
+        If nCR > 0 Then GoTo SkipLL2
+
         newComb = NextComb(staad)
         CombName = "1 DL"
         If nDL > 1 Then CombName = "1 DL + 1 CL"
-        If nLL > 0 Then
-            CombName = CombName & " + 0.75 LL"
-        End If
-        If nRL > 0 Then
-            CombName = CombName & " + 0.75 RL"
-        End If
+        If nLL > 0 Then CombName = CombName & " + 0.75 LL"
+        If nRL > 0 Then CombName = CombName & " + 0.75 RL"
         staad.Load.CreateNewLoadCombination CombName, newComb
         For iDL = 0 To nDL - 1
             staad.Load.AddLoadAndFactorToCombination newComb, DL_LC(iDL), 1
@@ -269,6 +269,28 @@ Sub GenerateCombinations(staad As Object, _
         For iRL = 0 To nRL - 1
             staad.Load.AddLoadAndFactorToCombination newComb, RL_LC(iRL), 0.75
         Next iRL
+
+        SkipLL2:
+        ' Per-crane combos: 1 DL + 0.75 LL + 0.75 RL + 0.75 CRn
+        For iCR = 0 To nCR - 1
+            newComb = NextComb(staad)
+            CombName = "1 DL"
+            If nDL > 1 Then CombName = "1 DL + 1 CL"
+            If nLL > 0 Then CombName = CombName & " + 0.75 LL"
+            If nRL > 0 Then CombName = CombName & " + 0.75 RL"
+            CombName = CombName & " + 0.75 CR" & (iCR + 1)
+            staad.Load.CreateNewLoadCombination CombName, newComb
+            For iDL = 0 To nDL - 1
+                staad.Load.AddLoadAndFactorToCombination newComb, DL_LC(iDL), 1
+            Next iDL
+            For iLL = 0 To nLL - 1
+                staad.Load.AddLoadAndFactorToCombination newComb, LL_LC(iLL), 0.75
+            Next iLL
+            For iRL = 0 To nRL - 1
+                staad.Load.AddLoadAndFactorToCombination newComb, RL_LC(iRL), 0.75
+            Next iRL
+            staad.Load.AddLoadAndFactorToCombination newComb, CR_LC(iCR), 0.75
+        Next iCR
     End If
 
     '==========================================================================
@@ -287,20 +309,42 @@ Sub GenerateCombinations(staad As Object, _
     Next iWL
 
     '==========================================================================
-    ' C6 : 1 DL + 0.75 LL + 0.75 RL + 0.45 WL   (looped over each WL direction)
+    ' C6 : 1 DL + 0.75 LL + 0.75 RL + 0.45 WL             (no crane)
+    '      1 DL + 0.75 LL + 0.75 RL + 0.45 WL + 0.75 CRn  (per crane if crane exists)
+    '      (looped over each WL direction)
     '==========================================================================
+    For iWL = 0 To nWL - 1
+        ' Base combo 
+        If nCR > 0 Then GoTo SkipLL3
 
-        For iWL = 0 To nWL - 1
+        newComb = NextComb(staad)
+        CombName = "1 DL"
+        If nDL > 1 Then CombName = "1 DL + 1 CL"
+        If nLL > 0 Then CombName = CombName & " + 0.75 LL"
+        If nRL > 0 Then CombName = CombName & " + 0.75 RL"
+        CombName = CombName & " + 0.45 WL" & (iWL + 1)
+        staad.Load.CreateNewLoadCombination CombName, newComb
+        For iDL = 0 To nDL - 1
+            staad.Load.AddLoadAndFactorToCombination newComb, DL_LC(iDL), 1
+        Next iDL
+        For iLL = 0 To nLL - 1
+            staad.Load.AddLoadAndFactorToCombination newComb, LL_LC(iLL), 0.75
+        Next iLL
+        For iRL = 0 To nRL - 1
+            staad.Load.AddLoadAndFactorToCombination newComb, RL_LC(iRL), 0.75
+        Next iRL
+        staad.Load.AddLoadAndFactorToCombination newComb, WL_LC(iWL), 0.45
+
+        SkipLL3:
+        ' Per-crane combos: base + 0.75 CRn
+        For iCR = 0 To nCR - 1
             newComb = NextComb(staad)
             CombName = "1 DL"
             If nDL > 1 Then CombName = "1 DL + 1 CL"
-            If nLL > 0 Then
-                CombName = CombName & " + 0.75 LL"
-            End If
-            If nRL > 0 Then
-                CombName = CombName & " + 0.75 RL"
-            End If
+            If nLL > 0 Then CombName = CombName & " + 0.75 LL"
+            If nRL > 0 Then CombName = CombName & " + 0.75 RL"
             CombName = CombName & " + 0.45 WL" & (iWL + 1)
+            CombName = CombName & " + 0.75 CR" & (iCR + 1)
             staad.Load.CreateNewLoadCombination CombName, newComb
             For iDL = 0 To nDL - 1
                 staad.Load.AddLoadAndFactorToCombination newComb, DL_LC(iDL), 1
@@ -312,7 +356,9 @@ Sub GenerateCombinations(staad As Object, _
                 staad.Load.AddLoadAndFactorToCombination newComb, RL_LC(iRL), 0.75
             Next iRL
             staad.Load.AddLoadAndFactorToCombination newComb, WL_LC(iWL), 0.45
-        Next iWL
+            staad.Load.AddLoadAndFactorToCombination newComb, CR_LC(iCR), 0.75
+        Next iCR
+    Next iWL
 
     '==========================================================================
     ' C7 : 0.6 DL + 0.6 WL   (looped over each WL direction)
@@ -345,17 +391,37 @@ Sub GenerateCombinations(staad As Object, _
     Next iEQ
 
     '==========================================================================
-    ' C9 : 1 DL + 0.75 LL + 0.525 EL   (looped over each EL case)
+    ' C9 : 1 DL + 0.75 LL + 0.525 EL                    (no crane)
+    '      1 DL + 0.75 LL + 0.525 EL + 0.75 CRn         (per crane if crane exists)
+    '      (looped over each EL case)
     '==========================================================================
+    For iEQ = 0 To nEQ - 1
+        ' Base combo
+        If nCR > 0 Then GoTo SkipLL4
 
-        For iEQ = 0 To nEQ - 1
+        newComb = NextComb(staad)
+        CombName = "1 DL"
+        If nDL > 1 Then CombName = "1 DL + 1 CL"
+        If nLL > 0 Then CombName = CombName & " + 0.75 LL"
+        CombName = CombName & " + 0.525 EL" & (iEQ + 1)
+        staad.Load.CreateNewLoadCombination CombName, newComb
+        For iDL = 0 To nDL - 1
+            staad.Load.AddLoadAndFactorToCombination newComb, DL_LC(iDL), 1
+        Next iDL
+        For iLL = 0 To nLL - 1
+            staad.Load.AddLoadAndFactorToCombination newComb, LL_LC(iLL), 0.75
+        Next iLL
+        staad.Load.AddLoadAndFactorToCombination newComb, EQ_LC(iEQ), 0.525
+
+        SkipLL4:
+        ' Per-crane combos: base + 0.75 CRn
+        For iCR = 0 To nCR - 1
             newComb = NextComb(staad)
             CombName = "1 DL"
             If nDL > 1 Then CombName = "1 DL + 1 CL"
-            If nLL > 0 Then
-                CombName = CombName & " + 0.75 LL"
-            End If
+            If nLL > 0 Then CombName = CombName & " + 0.75 LL"
             CombName = CombName & " + 0.525 EL" & (iEQ + 1)
+            CombName = CombName & " + 0.75 CR" & (iCR + 1)
             staad.Load.CreateNewLoadCombination CombName, newComb
             For iDL = 0 To nDL - 1
                 staad.Load.AddLoadAndFactorToCombination newComb, DL_LC(iDL), 1
@@ -364,7 +430,9 @@ Sub GenerateCombinations(staad As Object, _
                 staad.Load.AddLoadAndFactorToCombination newComb, LL_LC(iLL), 0.75
             Next iLL
             staad.Load.AddLoadAndFactorToCombination newComb, EQ_LC(iEQ), 0.525
-        Next iEQ
+            staad.Load.AddLoadAndFactorToCombination newComb, CR_LC(iCR), 0.75
+        Next iCR
+    Next iEQ
 
     '==========================================================================
     ' C10 : 0.6 DL + 0.7 EL   (looped over each EL case)
