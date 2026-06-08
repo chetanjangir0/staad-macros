@@ -119,11 +119,11 @@ Private Sub ExportMembersToDXF(os As Object, f As Integer)
             If Len(taperedLabel) > 0 Then
                 labelText = taperedLabel
             Else
-                labelText = "M" & CStr(BeamNos(i))
                 If Len(sectionName) > 0 Then
-                    labelText = labelText & " | " & sectionName
+                    labelText = sectionName & " (" & FormatNumberSafe(length) & " m)"
+                Else
+                    labelText = "(" & FormatNumberSafe(length) & " m)"
                 End If
-                labelText = labelText & " | L=" & FormatNumberSafe(length)
             End If
 
             WriteDXFLine f, "MEMBER_CENTERLINE", x1, y1, z1, x2, y2, z2, "DASHED"
