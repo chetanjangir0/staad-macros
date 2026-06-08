@@ -11,6 +11,7 @@ Sub Main()
     Dim StaadFile As String
     Dim DXFFile As String
     Dim f As Integer
+    Dim exportedMembers As Long
 
     Set objOpenSTAAD = GetObject(, "StaadPro.OpenSTAAD")
 
@@ -33,12 +34,19 @@ Sub Main()
     Open DXFFile For Output As #f
 
     WriteDXFHeader f
-    ExportMembersToDXF objOpenSTAAD, f
+    exportedMembers = ExportMembersToDXF(objOpenSTAAD, f)
     WriteDXFFooter f
 
     Close #f
 
-    MsgBox "DXF created successfully:" & vbCrLf & DXFFile, vbInformation
+    If exportedMembers > 0 Then
+        MsgBox "DXF created successfully:" & vbCrLf & DXFFile & vbCrLf & _
+               "Members exported: " & CStr(exportedMembers), vbInformation
+    Else
+        MsgBox "DXF was created, but no members were exported." & vbCrLf & _
+               "Check that a STAAD model with beam members is open and that OpenSTAAD is returning member incidences on this PC." & vbCrLf & _
+               DXFFile, vbExclamation
+    End If
 
     Set objOpenSTAAD = Nothing
 
@@ -69,7 +77,7 @@ Private Function PickOutputDXFFile(defaultPath As String) As String
     PickOutputDXFFile = result
 End Function
 
-Private Sub ExportMembersToDXF(os As Object, f As Integer)
+Private Function ExportMembersToDXF(os As Object, f As Integer) As Long
 
     Dim nMembers As Long
     Dim BeamNos() As Long
@@ -88,7 +96,7 @@ Private Sub ExportMembersToDXF(os As Object, f As Integer)
 
     nMembers = CLng(os.Geometry.GetMemberCount())
     If nMembers <= 0 Then
-        Exit Sub
+        Exit Function
     End If
 
     ReDim BeamNos(nMembers - 1)
@@ -96,9 +104,11 @@ Private Sub ExportMembersToDXF(os As Object, f As Integer)
 
     For i = 0 To nMembers - 1
 
+        startNode = 0
+        endNode = 0
         retVal = os.Geometry.GetMemberIncidence(BeamNos(i), startNode, endNode)
 
-        If retVal = 0 Then
+        If HasValidMemberIncidence(startNode, endNode) Then
 
             os.Geometry.GetNodeCoordinates startNode, x1, y1, z1
             os.Geometry.GetNodeCoordinates endNode, x2, y2, z2
@@ -129,12 +139,17 @@ Private Sub ExportMembersToDXF(os As Object, f As Integer)
             WriteDXFLine f, "MEMBER_CENTERLINE", x1, y1, z1, x2, y2, z2, "DASHED"
             WriteMemberEnvelope f, x1, y1, z1, x2, y2, z2, startHalfWidth, endHalfWidth, propertyType, sectionName
             WriteMemberLabel f, x1, y1, z1, x2, y2, z2, labelText, MaxD(startHalfWidth, endHalfWidth)
+            ExportMembersToDXF = ExportMembersToDXF + 1
 
         End If
 
     Next i
 
-End Sub
+End Function
+
+Private Function HasValidMemberIncidence(startNode As Long, endNode As Long) As Boolean
+    HasValidMemberIncidence = (startNode > 0 And endNode > 0)
+End Function
 
 Private Sub WriteMemberEnvelope( _
     f As Integer, _
