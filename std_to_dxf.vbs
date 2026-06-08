@@ -45,29 +45,27 @@ Sub Main()
 End Sub
 
 Private Function PickOutputDXFFile(defaultPath As String) As String
-    Dim dlg As Object
+    Dim shell As Object
+    Dim folder As Object
+    Dim defaultDir As String
+    Dim defaultName As String
     Dim result As String
-    result = ""
+
+    defaultDir = Left$(defaultPath, InStrRev(defaultPath, "\"))
+    defaultName = Mid$(defaultPath, InStrRev(defaultPath, "\") + 1)
+
     On Error Resume Next
-    Set dlg = CreateObject("UserAccounts.CommonDialog")
-    If Err.Number <> 0 Then
-        Err.Clear
-        result = InputBox("Enter full output path for DXF file:", "Save DXF As", defaultPath)
-        PickOutputDXFFile = result
+    Set shell = CreateObject("Shell.Application")
+    Set folder = shell.BrowseForFolder(0, "Select output folder for DXF file:", &H1, defaultDir)
+    On Error GoTo 0
+
+    If folder Is Nothing Then
+        PickOutputDXFFile = ""
         Exit Function
     End If
-    On Error GoTo 0
-    dlg.Filter = "DXF Files (*.dxf)|*.dxf|All Files (*.*)|*.*"
-    dlg.FilterIndex = 1
-    dlg.InitDir = Left$(defaultPath, InStrRev(defaultPath, "\"))
-    dlg.FileName = Mid$(defaultPath, InStrRev(defaultPath, "\") + 1)
-    dlg.Flags = &H800
-    If dlg.ShowSave Then
-        result = dlg.FileName
-        If LCase$(Right$(result, 4)) <> ".dxf" Then
-            result = result & ".dxf"
-        End If
-    End If
+
+    result = folder.Self.Path & "\" & defaultName
+    result = InputBox("Confirm or edit filename:", "Save DXF As", result)
     PickOutputDXFFile = result
 End Function
 
