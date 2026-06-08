@@ -206,11 +206,11 @@ Private Function FormatTaperedILabel(beamNo As Long, os As Object, memberLength 
         bf = Abs(propValues(6))
         tf = Abs(propValues(7))
     ElseIf propertyType = 680 Then
-        d1 = Abs(propValues(1))
-        d2 = Abs(propValues(0))
-        tw = Abs(propValues(2))
-        bf = Abs(propValues(3))
-        tf = Abs(propValues(4))
+        d1 = Abs(propValues(0))
+        d2 = Abs(propValues(2))
+        tw = Abs(propValues(1))
+        bf = MaxD(Abs(propValues(3)), Abs(propValues(5)))
+        tf = MaxD(Abs(propValues(4)), Abs(propValues(6)))
     Else
         FormatTaperedILabel = ""
         Exit Function
@@ -390,10 +390,12 @@ Private Sub GetEnvelopeFromPropertyValues( _
             End If
 
         Case 680
-            maxDim = MaxFirstValues(propValues, 0, 6)
-            If Abs(propValues(0)) > 0# And Abs(propValues(1)) > 0# Then
-                startHalfWidth = MaxD(Abs(propValues(1)) / 2#, MIN_SECTION_HALF_WIDTH)
-                endHalfWidth = MaxD(Abs(propValues(0)) / 2#, MIN_SECTION_HALF_WIDTH)
+            d1 = Abs(propValues(0))
+            d2 = Abs(propValues(2))
+            maxDim = MaxD(d1, d2)
+            If d1 > 0# And d2 > 0# Then
+                startHalfWidth = MaxD(d1 / 2#, MIN_SECTION_HALF_WIDTH)
+                endHalfWidth = MaxD(d2 / 2#, MIN_SECTION_HALF_WIDTH)
                 Exit Sub
             End If
 
