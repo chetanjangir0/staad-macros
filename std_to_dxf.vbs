@@ -223,21 +223,38 @@ Private Sub WriteMemberLabel( _
     Dim memberLength As Double
     Dim textHeight As Double
     Dim rotationDeg As Double
+    Dim lx1 As Double, ly1 As Double, lz1 As Double
+    Dim lx2 As Double, ly2 As Double, lz2 As Double
 
-    mx = (x1 + x2) / 2#
-    my = (y1 + y2) / 2#
-    mz = (z1 + z2) / 2#
+    If x2 < x1 Then
+        lx1 = x2 : ly1 = y2 : lz1 = z2
+        lx2 = x1 : ly2 = y1 : lz2 = z1
+    Else
+        lx1 = x1 : ly1 = y1 : lz1 = z1
+        lx2 = x2 : ly2 = y2 : lz2 = z2
+    End If
 
-    memberLength = Distance3D(x1, y1, z1, x2, y2, z2)
+    mx = (lx1 + lx2) / 2#
+    my = (ly1 + ly2) / 2#
+    mz = (lz1 + lz2) / 2#
+
+    memberLength = Distance3D(lx1, ly1, lz1, lx2, ly2, lz2)
     textHeight = MaxD(memberLength * LABEL_HEIGHT_FACTOR, halfWidth * 0.45)
     textHeight = MaxD(textHeight, 0.1)
 
-    GetViewOffsetVector x1, y1, z1, x2, y2, z2, ox, oy, oz
+    GetViewOffsetVector lx1, ly1, lz1, lx2, ly2, lz2, ox, oy, oz
+
+    If oy < 0# Then
+        ox = -ox
+        oy = -oy
+        oz = -oz
+    End If
+
     mx = mx + ox * (halfWidth + textHeight * 1.5)
     my = my + oy * (halfWidth + textHeight * 1.5)
     mz = mz + oz * (halfWidth + textHeight * 1.5)
 
-    rotationDeg = Atn2(y2 - y1, x2 - x1) * 180# / PI
+    rotationDeg = Atn2(ly2 - ly1, lx2 - lx1) * 180# / PI
 
     WriteDXFText f, "MEMBER_LABELS", mx, my, mz, textHeight, rotationDeg, labelText
 
