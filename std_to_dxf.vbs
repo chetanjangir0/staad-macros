@@ -21,7 +21,13 @@ Sub Main()
         Exit Sub
     End If
 
-    DXFFile = Left$(StaadFile, Len(StaadFile) - 4) & "_Geometry_Sections.dxf"
+    Dim defaultDXF As String
+    defaultDXF = Left$(StaadFile, Len(StaadFile) - 4) & "_Geometry_Sections.dxf"
+    DXFFile = PickOutputDXFFile(defaultDXF)
+    If DXFFile = "" Then
+        MsgBox "Export cancelled.", vbInformation
+        Exit Sub
+    End If
 
     f = FreeFile
     Open DXFFile For Output As #f
@@ -37,6 +43,33 @@ Sub Main()
     Set objOpenSTAAD = Nothing
 
 End Sub
+
+Private Function PickOutputDXFFile(defaultPath As String) As String
+    Dim dlg As Object
+    Dim result As String
+    result = ""
+    On Error Resume Next
+    Set dlg = CreateObject("UserAccounts.CommonDialog")
+    If Err.Number <> 0 Then
+        Err.Clear
+        result = InputBox("Enter full output path for DXF file:", "Save DXF As", defaultPath)
+        PickOutputDXFFile = result
+        Exit Function
+    End If
+    On Error GoTo 0
+    dlg.Filter = "DXF Files (*.dxf)|*.dxf|All Files (*.*)|*.*"
+    dlg.FilterIndex = 1
+    dlg.InitDir = Left$(defaultPath, InStrRev(defaultPath, "\"))
+    dlg.FileName = Mid$(defaultPath, InStrRev(defaultPath, "\") + 1)
+    dlg.Flags = &H800
+    If dlg.ShowSave Then
+        result = dlg.FileName
+        If LCase$(Right$(result, 4)) <> ".dxf" Then
+            result = result & ".dxf"
+        End If
+    End If
+    PickOutputDXFFile = result
+End Function
 
 Private Sub ExportMembersToDXF(os As Object, f As Integer)
 
