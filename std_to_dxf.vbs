@@ -273,8 +273,8 @@ Private Sub GetEnvelopeFromPropertyValues( _
             maxDim = Abs(propValues(1))
 
         Case 675
-            d1 = Abs(propValues(4))
-            d2 = Abs(propValues(5))
+            d1 = Abs(propValues(5))
+            d2 = Abs(propValues(4))
             maxDim = MaxD(d1, d2)
             If d1 > 0# And d2 > 0# Then
                 startHalfWidth = MaxD(d1 / 2#, MIN_SECTION_HALF_WIDTH)
@@ -285,8 +285,8 @@ Private Sub GetEnvelopeFromPropertyValues( _
         Case 680
             maxDim = MaxFirstValues(propValues, 0, 6)
             If Abs(propValues(0)) > 0# And Abs(propValues(1)) > 0# Then
-                startHalfWidth = MaxD(Abs(propValues(0)) / 2#, MIN_SECTION_HALF_WIDTH)
-                endHalfWidth = MaxD(Abs(propValues(1)) / 2#, MIN_SECTION_HALF_WIDTH)
+                startHalfWidth = MaxD(Abs(propValues(1)) / 2#, MIN_SECTION_HALF_WIDTH)
+                endHalfWidth = MaxD(Abs(propValues(0)) / 2#, MIN_SECTION_HALF_WIDTH)
                 Exit Sub
             End If
 
@@ -596,10 +596,18 @@ Private Sub WriteDXFText( _
     Print #f, FormatDXF(z)
     Print #f, "40"
     Print #f, FormatDXF(height)
-    Print #f, "50"
-    Print #f, FormatDXF(rotationDeg)
     Print #f, "1"
     Print #f, CleanDXFText(value)
+    Print #f, "50"
+    Print #f, FormatDXF(rotationDeg)
+    Print #f, "72"
+    Print #f, "1"
+    Print #f, "11"
+    Print #f, FormatDXF(x)
+    Print #f, "21"
+    Print #f, FormatDXF(y)
+    Print #f, "31"
+    Print #f, FormatDXF(z)
 
 End Sub
 
