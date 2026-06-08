@@ -4,6 +4,10 @@ Private Const PI As Double = 3.14159265358979
 Private Const MIN_SECTION_HALF_WIDTH As Double = 0.05
 Private Const SECTION_WIDTH_SCALE As Double = 1#
 Private Const LABEL_HEIGHT_FACTOR As Double = 0.035
+Private Const MIN_LABEL_HEIGHT As Double = 0.05
+Private Const SHORT_MEMBER_LENGTH As Double = 2#
+Private Const LABEL_WIDTH_FACTOR As Double = 0.65
+Private Const LABEL_MAX_SPAN_FACTOR As Double = 0.8
 
 Sub Main()
 
@@ -127,13 +131,13 @@ Private Function ExportMembersToDXF(os As Object, f As Integer) As Long
             End If
 
             If Len(taperedLabel) > 0 Then
-                labelText = taperedLabel
-            Else
-                If Len(sectionName) > 0 Then
-                    labelText = sectionName & " (" & FormatNumberSafe(length) & " m)"
+                If length < SHORT_MEMBER_LENGTH Then
+                    labelText = CompactTaperedLabel(taperedLabel)
                 Else
-                    labelText = "(" & FormatNumberSafe(length) & " m)"
+                    labelText = taperedLabel
                 End If
+            Else
+                labelText = FormatMemberLabel(sectionName, length)
             End If
 
             WriteDXFLine f, "MEMBER_CENTERLINE", x1, y1, z1, x2, y2, z2, "DASHED"
@@ -145,6 +149,26 @@ Private Function ExportMembersToDXF(os As Object, f As Integer) As Long
 
     Next i
 
+End Function
+
+Private Function FormatMemberLabel(sectionName As String, memberLength As Double) As String
+    If memberLength < SHORT_MEMBER_LENGTH And Len(sectionName) > 0 Then
+        FormatMemberLabel = sectionName
+    ElseIf Len(sectionName) > 0 Then
+        FormatMemberLabel = sectionName & " (" & FormatNumberSafe(memberLength) & " m)"
+    Else
+        FormatMemberLabel = "(" & FormatNumberSafe(memberLength) & " m)"
+    End If
+End Function
+
+Private Function CompactTaperedLabel(labelText As String) As String
+    Dim p As Long
+    p = InStr(labelText, " (")
+    If p > 0 Then
+        CompactTaperedLabel = Left$(labelText, p - 1)
+    Else
+        CompactTaperedLabel = labelText
+    End If
 End Function
 
 Private Function HasValidMemberIncidence(startNode As Long, endNode As Long) As Boolean
@@ -237,6 +261,7 @@ Private Sub WriteMemberLabel( _
     Dim ox As Double, oy As Double, oz As Double
     Dim memberLength As Double
     Dim textHeight As Double
+    Dim maxTextHeight As Double
     Dim rotationDeg As Double
     Dim lx1 As Double, ly1 As Double, lz1 As Double
     Dim lx2 As Double, ly2 As Double, lz2 As Double
@@ -255,7 +280,12 @@ Private Sub WriteMemberLabel( _
 
     memberLength = Distance3D(lx1, ly1, lz1, lx2, ly2, lz2)
     textHeight = MaxD(memberLength * LABEL_HEIGHT_FACTOR, halfWidth * 0.45)
-    textHeight = MaxD(textHeight, 0.1)
+    textHeight = MaxD(textHeight, MIN_LABEL_HEIGHT)
+    maxTextHeight = GetMaxLabelHeightForSpan(labelText, memberLength)
+    If maxTextHeight > 0# Then
+        textHeight = MinD(textHeight, maxTextHeight)
+        textHeight = MaxD(textHeight, MIN_LABEL_HEIGHT)
+    End If
 
     GetViewOffsetVector lx1, ly1, lz1, lx2, ly2, lz2, ox, oy, oz
 
@@ -274,6 +304,18 @@ Private Sub WriteMemberLabel( _
     WriteDXFText f, "MEMBER_LABELS", mx, my, mz, textHeight, rotationDeg, labelText
 
 End Sub
+
+Private Function GetMaxLabelHeightForSpan(labelText As String, memberLength As Double) As Double
+    Dim textChars As Long
+
+    textChars = Len(CleanDXFText(labelText))
+    If textChars <= 0 Or memberLength <= 0# Then
+        GetMaxLabelHeightForSpan = 0#
+        Exit Function
+    End If
+
+    GetMaxLabelHeightForSpan = (memberLength * LABEL_MAX_SPAN_FACTOR) / (CDbl(textChars) * LABEL_WIDTH_FACTOR)
+End Function
 
 Private Function GetMemberLength( _
     os As Object, _
