@@ -107,11 +107,24 @@ Private Sub ExportMembersToDXF(os As Object, f As Integer)
             sectionName = GetMemberSectionDisplayName(os, BeamNos(i))
             GetMemberVisualHalfWidths os, BeamNos(i), length, startHalfWidth, endHalfWidth, propertyType
 
-            labelText = "M" & CStr(BeamNos(i))
-            If Len(sectionName) > 0 Then
-                labelText = labelText & " | " & sectionName
+            Dim taperedLabel As String
+            Dim pv(23) As Double
+            Dim pt As Long
+            taperedLabel = ""
+            If propertyType = 675 Or propertyType = 680 Then
+                os.Property.GetBeamSectionPropertyValuesEx BeamNos(i), pt, pv
+                taperedLabel = FormatTaperedILabel(BeamNos(i), os, length, pt, pv)
             End If
-            labelText = labelText & " | L=" & FormatNumberSafe(length)
+
+            If Len(taperedLabel) > 0 Then
+                labelText = taperedLabel
+            Else
+                labelText = "M" & CStr(BeamNos(i))
+                If Len(sectionName) > 0 Then
+                    labelText = labelText & " | " & sectionName
+                End If
+                labelText = labelText & " | L=" & FormatNumberSafe(length)
+            End If
 
             WriteDXFLine f, "MEMBER_CENTERLINE", x1, y1, z1, x2, y2, z2, "DASHED"
             WriteMemberEnvelope f, x1, y1, z1, x2, y2, z2, startHalfWidth, endHalfWidth, propertyType, sectionName
@@ -166,6 +179,37 @@ Private Sub WriteMemberEnvelope( _
     End If
 
 End Sub
+
+Private Function FormatTaperedILabel(beamNo As Long, os As Object, memberLength As Double, propertyType As Long, propValues() As Double) As String
+    Dim d1 As Double, d2 As Double
+    Dim bf As Double, tf As Double, tw As Double
+
+    If propertyType = 675 Then
+        d1 = Abs(propValues(4))
+        d2 = Abs(propValues(5))
+        tw = Abs(propValues(1))
+        bf = Abs(propValues(6))
+        tf = Abs(propValues(7))
+    ElseIf propertyType = 680 Then
+        d1 = Abs(propValues(1))
+        d2 = Abs(propValues(0))
+        tw = Abs(propValues(2))
+        bf = Abs(propValues(3))
+        tf = Abs(propValues(4))
+    Else
+        FormatTaperedILabel = ""
+        Exit Function
+    End If
+
+    d1 = d1 * 1000#
+    d2 = d2 * 1000#
+    tw = tw * 1000#
+    bf = bf * 1000#
+    tf = tf * 1000#
+
+    FormatTaperedILabel = "W:" & Format$(tw, "0") & "~" & Format$(d2, "0") & "x" & Format$(d1, "0") & ";" & Chr(10) & _
+                          "F:" & Format$(bf, "0") & "x" & Format$(tf, "0") & " (" & FormatNumberSafe(memberLength) & " m)"
+End Function
 
 Private Sub WriteMemberLabel( _
     f As Integer, _
@@ -669,6 +713,14 @@ Private Function MaxD(a As Double, b As Double) As Double
         MaxD = a
     Else
         MaxD = b
+    End If
+End Function
+
+Private Function MinD(a As Double, b As Double) As Double
+    If a < b Then
+        MinD = a
+    Else
+        MinD = b
     End If
 End Function
 
