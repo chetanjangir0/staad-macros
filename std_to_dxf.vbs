@@ -47,8 +47,8 @@ Sub Main()
         MsgBox "DXF created successfully:" & vbCrLf & DXFFile & vbCrLf & _
                "Members exported: " & CStr(exportedMembers), vbInformation
     Else
-        MsgBox "DXF was created, but no members were exported." & vbCrLf & _
-               "Check that a STAAD model with beam members is open and that OpenSTAAD is returning member incidences on this PC." & vbCrLf & _
+        MsgBox "DXF was created, but no selected members were exported." & vbCrLf & _
+               "Select one or more beam members in STAAD before running this macro." & vbCrLf & _
                DXFFile, vbExclamation
     End If
 
@@ -98,13 +98,13 @@ Private Function ExportMembersToDXF(os As Object, f As Integer) As Long
     Dim endHalfWidth As Double
     Dim labelText As String
 
-    nMembers = CLng(os.Geometry.GetMemberCount())
+    nMembers = CLng(os.Geometry.GetNoOfSelectedBeams())
     If nMembers <= 0 Then
         Exit Function
     End If
 
     ReDim BeamNos(nMembers - 1)
-    os.Geometry.GetBeamList BeamNos
+    os.Geometry.GetSelectedBeams BeamNos, 1
 
     For i = 0 To nMembers - 1
 
