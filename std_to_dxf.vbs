@@ -9,6 +9,8 @@ Private Const SHORT_MEMBER_LENGTH As Double = 2#
 Private Const LABEL_WIDTH_FACTOR As Double = 0.65
 Private Const LABEL_MAX_SPAN_FACTOR As Double = 0.8
 
+Private gViewPlane As String
+
 Sub Main()
 
     Dim objOpenSTAAD As Object
@@ -28,8 +30,7 @@ Sub Main()
 
     Dim defaultDXF As String
     defaultDXF = Left$(StaadFile, Len(StaadFile) - 4) & "_Geometry_Sections.dxf"
-    DXFFile = PickOutputDXFFile(defaultDXF)
-    If DXFFile = "" Then
+    If Not GetExportSettings(defaultDXF, DXFFile, gViewPlane) Then
         MsgBox "Export cancelled.", vbInformation
         Exit Sub
     End If
@@ -56,29 +57,184 @@ Sub Main()
 
 End Sub
 
-Private Function PickOutputDXFFile(defaultPath As String) As String
+Private Function GetExportSettings(defaultPath As String, ByRef outputPath As String, ByRef viewPlane As String) As Boolean
+    Dim fso As Object
     Dim shell As Object
-    Dim folder As Object
     Dim defaultDir As String
     Dim defaultName As String
-    Dim result As String
+    Dim tempDir As String
+    Dim htaPath As String
+    Dim resultPath As String
+    Dim ts As Object
+    Dim line As String
+    Dim p As Long
+    Dim key As String
+    Dim value As String
+    Dim cancelled As Boolean
+    Dim folder As String
+    Dim fileName As String
 
     defaultDir = Left$(defaultPath, InStrRev(defaultPath, "\"))
     defaultName = Mid$(defaultPath, InStrRev(defaultPath, "\") + 1)
 
     On Error Resume Next
-    Set shell = CreateObject("Shell.Application")
-    Set folder = shell.BrowseForFolder(0, "Select output folder for DXF file:", &H1, defaultDir)
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    Set shell = CreateObject("WScript.Shell")
+    tempDir = shell.ExpandEnvironmentStrings("%TEMP%")
+    htaPath = fso.BuildPath(tempDir, "staad_dxf_export_settings.hta")
+    resultPath = fso.BuildPath(tempDir, "staad_dxf_export_settings.txt")
+
+    If fso.FileExists(resultPath) Then
+        fso.DeleteFile resultPath, True
+    End If
+
+    WriteSettingsHTA htaPath, resultPath, defaultDir, defaultName
+    shell.Run "mshta.exe " & QuoteArg(htaPath), 1, True
     On Error GoTo 0
 
-    If folder Is Nothing Then
-        PickOutputDXFFile = ""
+    If fso Is Nothing Then
+        GetExportSettings = False
         Exit Function
     End If
 
-    result = folder.Self.Path & "\" & defaultName
-    result = InputBox("Confirm or edit filename:", "Save DXF As", result)
-    PickOutputDXFFile = result
+    If Not fso.FileExists(resultPath) Then
+        GetExportSettings = False
+        Exit Function
+    End If
+
+    cancelled = True
+    folder = defaultDir
+    fileName = defaultName
+    viewPlane = "XY"
+
+    Set ts = fso.OpenTextFile(resultPath, 1, False)
+    Do Until ts.AtEndOfStream
+        line = ts.ReadLine
+        p = InStr(line, "=")
+        If p > 0 Then
+            key = LCase$(Left$(line, p - 1))
+            value = Mid$(line, p + 1)
+            Select Case key
+                Case "cancelled"
+                    cancelled = (value <> "0")
+                Case "folder"
+                    folder = value
+                Case "filename"
+                    fileName = value
+                Case "plane"
+                    viewPlane = UCase$(value)
+            End Select
+        End If
+    Loop
+    ts.Close
+
+    If cancelled Or Len(Trim$(folder)) = 0 Or Len(Trim$(fileName)) = 0 Then
+        GetExportSettings = False
+        Exit Function
+    End If
+
+    If LCase$(Right$(fileName, 4)) <> ".dxf" Then
+        fileName = fileName & ".dxf"
+    End If
+
+    If Right$(folder, 1) = "\" Then
+        outputPath = folder & fileName
+    Else
+        outputPath = folder & "\" & fileName
+    End If
+
+    If viewPlane <> "XY" And viewPlane <> "YZ" And viewPlane <> "ZX" Then
+        viewPlane = "XY"
+    End If
+
+    GetExportSettings = True
+End Function
+
+Private Sub WriteSettingsHTA(htaPath As String, resultPath As String, defaultDir As String, defaultName As String)
+    Dim f As Integer
+
+    f = FreeFile
+    Open htaPath For Output As #f
+
+    Print #f, "<html>"
+    Print #f, "<head>"
+    Print #f, "<title>Export STAAD Members to DXF</title>"
+    Print #f, "<HTA:APPLICATION ID=""DXFExportSettings"" APPLICATIONNAME=""STAAD DXF Export"" BORDER=""thin"" CAPTION=""yes"" SHOWINTASKBAR=""yes"" SINGLEINSTANCE=""yes"" SYSMENU=""yes"" WINDOWSTATE=""normal"">"
+    Print #f, "<style>"
+    Print #f, "body{font-family:Segoe UI,Arial,sans-serif;font-size:13px;margin:18px;color:#202020;background:#f6f6f6;} label{display:block;margin:12px 0 5px;} input[type=text]{width:360px;padding:6px;} button{padding:6px 14px;margin-left:6px;} .row{display:flex;align-items:center;} .planes label{display:inline-block;margin-right:18px;} .actions{text-align:right;margin-top:18px;}"
+    Print #f, "</style>"
+    Print #f, "<script language=""VBScript"">"
+    Print #f, "Option Explicit"
+    Print #f, "Const RESULT_PATH = """ & EscapeVBString(resultPath) & """"
+    Print #f, "Sub Window_OnLoad"
+    Print #f, "  document.getElementById(""folder"").Value = """ & EscapeVBString(RemoveTrailingBackslash(defaultDir)) & """"
+    Print #f, "  document.getElementById(""filename"").Value = """ & EscapeVBString(defaultName) & """"
+    Print #f, "  window.resizeTo 560, 350"
+    Print #f, "End Sub"
+    Print #f, "Sub btnBrowse_OnClick"
+    Print #f, "  Dim sh, fld, startFolder"
+    Print #f, "  startFolder = document.getElementById(""folder"").Value"
+    Print #f, "  Set sh = CreateObject(""Shell.Application"")"
+    Print #f, "  Set fld = sh.BrowseForFolder(0, ""Select output folder for DXF file:"", &H1, startFolder)"
+    Print #f, "  If Not fld Is Nothing Then document.getElementById(""folder"").Value = fld.Self.Path"
+    Print #f, "End Sub"
+    Print #f, "Sub btnExport_OnClick"
+    Print #f, "  Dim fso, ts, plane"
+    Print #f, "  plane = ""XY"""
+    Print #f, "  If document.getElementById(""planeYZ"").Checked Then plane = ""YZ"""
+    Print #f, "  If document.getElementById(""planeZX"").Checked Then plane = ""ZX"""
+    Print #f, "  Set fso = CreateObject(""Scripting.FileSystemObject"")"
+    Print #f, "  Set ts = fso.CreateTextFile(RESULT_PATH, True)"
+    Print #f, "  ts.WriteLine ""cancelled=0"""
+    Print #f, "  ts.WriteLine ""folder="" & document.getElementById(""folder"").Value"
+    Print #f, "  ts.WriteLine ""filename="" & document.getElementById(""filename"").Value"
+    Print #f, "  ts.WriteLine ""plane="" & plane"
+    Print #f, "  ts.Close"
+    Print #f, "  window.close"
+    Print #f, "End Sub"
+    Print #f, "Sub btnCancel_OnClick"
+    Print #f, "  Dim fso, ts"
+    Print #f, "  Set fso = CreateObject(""Scripting.FileSystemObject"")"
+    Print #f, "  Set ts = fso.CreateTextFile(RESULT_PATH, True)"
+    Print #f, "  ts.WriteLine ""cancelled=1"""
+    Print #f, "  ts.Close"
+    Print #f, "  window.close"
+    Print #f, "End Sub"
+    Print #f, "</script>"
+    Print #f, "</head>"
+    Print #f, "<body>"
+    Print #f, "<h3>Export Selected Beams to DXF</h3>"
+    Print #f, "<label for=""filename"">File name</label>"
+    Print #f, "<input id=""filename"" type=""text"">"
+    Print #f, "<label for=""folder"">Output folder</label>"
+    Print #f, "<div class=""row""><input id=""folder"" type=""text""><button id=""btnBrowse"">Browse...</button></div>"
+    Print #f, "<label>View plane mapped to DXF X-Y</label>"
+    Print #f, "<div class=""planes"">"
+    Print #f, "<label><input id=""planeXY"" name=""plane"" type=""radio"" checked> X-Y</label>"
+    Print #f, "<label><input id=""planeYZ"" name=""plane"" type=""radio""> Y-Z</label>"
+    Print #f, "<label><input id=""planeZX"" name=""plane"" type=""radio""> Z-X</label>"
+    Print #f, "</div>"
+    Print #f, "<div class=""actions""><button id=""btnCancel"">Cancel</button><button id=""btnExport"">Export</button></div>"
+    Print #f, "</body>"
+    Print #f, "</html>"
+
+    Close #f
+End Sub
+
+Private Function EscapeVBString(value As String) As String
+    EscapeVBString = Replace$(value, """", """""")
+End Function
+
+Private Function RemoveTrailingBackslash(value As String) As String
+    If Len(value) > 3 And Right$(value, 1) = "\" Then
+        RemoveTrailingBackslash = Left$(value, Len(value) - 1)
+    Else
+        RemoveTrailingBackslash = value
+    End If
+End Function
+
+Private Function QuoteArg(value As String) As String
+    QuoteArg = """" & Replace$(value, """", """""") & """"
 End Function
 
 Private Function ExportMembersToDXF(os As Object, f As Integer) As Long
@@ -118,6 +274,9 @@ Private Function ExportMembersToDXF(os As Object, f As Integer) As Long
             os.Geometry.GetNodeCoordinates endNode, x2, y2, z2
 
             length = GetMemberLength(os, BeamNos(i), x1, y1, z1, x2, y2, z2)
+            MapPointToDXFPlane x1, y1, z1
+            MapPointToDXFPlane x2, y2, z2
+
             sectionName = GetMemberSectionDisplayName(os, BeamNos(i))
             GetMemberVisualHalfWidths os, BeamNos(i), length, startHalfWidth, endHalfWidth, propertyType
 
@@ -150,6 +309,27 @@ Private Function ExportMembersToDXF(os As Object, f As Integer) As Long
     Next i
 
 End Function
+
+Private Sub MapPointToDXFPlane(ByRef x As Double, ByRef y As Double, ByRef z As Double)
+    Dim tx As Double
+    Dim ty As Double
+
+    Select Case gViewPlane
+        Case "YZ"
+            tx = y
+            ty = z
+        Case "ZX"
+            tx = z
+            ty = x
+        Case Else
+            tx = x
+            ty = y
+    End Select
+
+    x = tx
+    y = ty
+    z = 0#
+End Sub
 
 Private Function FormatMemberLabel(sectionName As String, memberLength As Double) As String
     If memberLength < SHORT_MEMBER_LENGTH And Len(sectionName) > 0 Then
