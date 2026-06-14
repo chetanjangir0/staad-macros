@@ -426,8 +426,8 @@ Private Function FormatTaperedILabel(beamNo As Long, os As Object, memberLength 
     bf = bf * 1000#
     tf = tf * 1000#
 
-    FormatTaperedILabel = "W:" & Format$(d2, "0") & "~" & Format$(d1, "0") & "x" & Format$(tw, "0") & ";" & Chr(10) & _
-                          "F:" & Format$(bf, "0") & "x" & Format$(tf, "0") & " (" & FormatNumberSafe(memberLength) & " m)"
+    FormatTaperedILabel = "W(" & Format$(d2, "0") & "~" & Format$(d1, "0") & "x" & Format$(tw, "0") & ") " & _
+                          "2F(" & Format$(bf, "0") & "x" & Format$(tf, "0") & "); (" & FormatNumberSafe(memberLength) & " m)"
 End Function
 
 Private Sub WriteMemberLabel( _
