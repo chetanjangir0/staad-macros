@@ -10,6 +10,7 @@ Private Const LABEL_WIDTH_FACTOR As Double = 0.65
 Private Const LABEL_MAX_SPAN_FACTOR As Double = 0.8
 
 Private gViewPlane As String
+Private gLabelTextScale As Double
 
 Sub Main()
 
@@ -106,6 +107,7 @@ Private Function GetExportSettings(defaultPath As String, ByRef outputPath As St
     folder = defaultDir
     fileName = defaultName
     viewPlane = "XY"
+    gLabelTextScale = 1#
 
     Set ts = fso.OpenTextFile(resultPath, 1, False)
     Do Until ts.AtEndOfStream
@@ -123,6 +125,10 @@ Private Function GetExportSettings(defaultPath As String, ByRef outputPath As St
                     fileName = value
                 Case "plane"
                     viewPlane = UCase$(value)
+                Case "textscale"
+                    If IsNumeric(value) Then
+                        gLabelTextScale = CDbl(value)
+                    End If
             End Select
         End If
     Loop
@@ -147,6 +153,10 @@ Private Function GetExportSettings(defaultPath As String, ByRef outputPath As St
         viewPlane = "XY"
     End If
 
+    If gLabelTextScale < 0.1 Or gLabelTextScale > 10# Then
+        gLabelTextScale = 1#
+    End If
+
     GetExportSettings = True
 End Function
 
@@ -169,7 +179,8 @@ Private Sub WriteSettingsHTA(htaPath As String, resultPath As String, defaultDir
     Print #f, "Sub Window_OnLoad"
     Print #f, "  document.getElementById(""folder"").Value = """ & EscapeVBString(RemoveTrailingBackslash(defaultDir)) & """"
     Print #f, "  document.getElementById(""filename"").Value = """ & EscapeVBString(defaultName) & """"
-    Print #f, "  window.resizeTo 560, 350"
+    Print #f, "  document.getElementById(""textscale"").Value = ""1.00"""
+    Print #f, "  window.resizeTo 560, 410"
     Print #f, "End Sub"
     Print #f, "Sub btnBrowse_OnClick"
     Print #f, "  Dim sh, fld, startFolder"
@@ -179,16 +190,18 @@ Private Sub WriteSettingsHTA(htaPath As String, resultPath As String, defaultDir
     Print #f, "  If Not fld Is Nothing Then document.getElementById(""folder"").Value = fld.Self.Path"
     Print #f, "End Sub"
     Print #f, "Sub btnExport_OnClick"
-    Print #f, "  Dim fso, ts, plane"
+    Print #f, "  Dim fso, ts, plane, textScale"
     Print #f, "  plane = ""XY"""
     Print #f, "  If document.getElementById(""planeYZ"").Checked Then plane = ""YZ"""
     Print #f, "  If document.getElementById(""planeZX"").Checked Then plane = ""ZX"""
+    Print #f, "  textScale = document.getElementById(""textscale"").Value"
     Print #f, "  Set fso = CreateObject(""Scripting.FileSystemObject"")"
     Print #f, "  Set ts = fso.CreateTextFile(RESULT_PATH, True)"
     Print #f, "  ts.WriteLine ""cancelled=0"""
     Print #f, "  ts.WriteLine ""folder="" & document.getElementById(""folder"").Value"
     Print #f, "  ts.WriteLine ""filename="" & document.getElementById(""filename"").Value"
     Print #f, "  ts.WriteLine ""plane="" & plane"
+    Print #f, "  ts.WriteLine ""textscale="" & textScale"
     Print #f, "  ts.Close"
     Print #f, "  window.close"
     Print #f, "End Sub"
@@ -214,6 +227,8 @@ Private Sub WriteSettingsHTA(htaPath As String, resultPath As String, defaultDir
     Print #f, "<label><input id=""planeYZ"" name=""plane"" type=""radio""> Y-Z</label>"
     Print #f, "<label><input id=""planeZX"" name=""plane"" type=""radio""> Z-X</label>"
     Print #f, "</div>"
+    Print #f, "<label for=""textscale"">Text size scale</label>"
+    Print #f, "<input id=""textscale"" type=""text"">"
     Print #f, "<div class=""actions""><button id=""btnCancel"">Cancel</button><button id=""btnExport"">Export</button></div>"
     Print #f, "</body>"
     Print #f, "</html>"
@@ -460,6 +475,7 @@ Private Sub WriteMemberLabel( _
 
     memberLength = Distance3D(lx1, ly1, lz1, lx2, ly2, lz2)
     textHeight = MaxD(memberLength * LABEL_HEIGHT_FACTOR, halfWidth * 0.45)
+    textHeight = textHeight * gLabelTextScale
     textHeight = MaxD(textHeight, MIN_LABEL_HEIGHT)
     maxTextHeight = GetMaxLabelHeightForSpan(labelText, memberLength)
     If maxTextHeight > 0# Then
