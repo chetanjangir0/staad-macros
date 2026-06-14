@@ -316,8 +316,8 @@ Private Sub MapPointToDXFPlane(ByRef x As Double, ByRef y As Double, ByRef z As 
 
     Select Case gViewPlane
         Case "YZ"
-            tx = y
-            ty = z
+            tx = z
+            ty = y
         Case "ZX"
             tx = z
             ty = x
