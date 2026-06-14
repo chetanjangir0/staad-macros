@@ -294,6 +294,7 @@ Private Function ExportMembersToDXF(os As Object, f As Integer) As Long
 
             sectionName = GetMemberSectionDisplayName(os, BeamNos(i))
             GetMemberVisualHalfWidths os, BeamNos(i), length, startHalfWidth, endHalfWidth, propertyType
+            sectionName = FormatTubePipeSectionName(os, BeamNos(i), propertyType, sectionName)
 
             Dim taperedLabel As String
             Dim pv(23) As Double
@@ -542,6 +543,113 @@ Private Function GetMemberSectionDisplayName(os As Object, beamNo As Long) As St
         GetMemberSectionDisplayName = "NO SECTION"
     End If
     On Error GoTo 0
+End Function
+
+Private Function FormatTubePipeSectionName(os As Object, beamNo As Long, propertyType As Long, sectionName As String) As String
+    Dim propValues(23) As Double
+    Dim pt As Long
+    Dim formattedName As String
+    Dim hasExtendedValues As Boolean
+
+    FormatTubePipeSectionName = sectionName
+
+    If Not IsTubeOrPipeSection(propertyType, sectionName) Then
+        Exit Function
+    End If
+
+    On Error Resume Next
+    os.Property.GetBeamSectionPropertyValuesEx beamNo, pt, propValues
+    If Err.Number <> 0 Then
+        Err.Clear
+        hasExtendedValues = False
+    Else
+        hasExtendedValues = True
+    End If
+    On Error GoTo 0
+
+    If hasExtendedValues Then
+        Select Case pt
+            Case 2
+                If IsPipeSectionName(sectionName) Then
+                    formattedName = FormatPipeSectionName(propValues(0), propValues(1))
+                ElseIf IsTubeSectionName(sectionName) Then
+                    formattedName = FormatTubeSectionName(propValues(2), propValues(1), propValues(0))
+                End If
+            Case 650, 654, 696
+                formattedName = FormatTubeSectionName(propValues(1), propValues(2), propValues(3))
+            Case 660, 655
+                formattedName = FormatPipeSectionName(propValues(1), MaxD(propValues(1) - 2# * propValues(2), 0#))
+            Case 695
+                formattedName = FormatPipeSectionName(propValues(1), propValues(2))
+        End Select
+    End If
+
+    If Len(formattedName) = 0 Then
+        formattedName = FormatTubePipeFromBeamPropertyAll(os, beamNo, sectionName)
+    End If
+
+    If Len(formattedName) > 0 Then
+        FormatTubePipeSectionName = formattedName
+    End If
+End Function
+
+Private Function FormatTubePipeFromBeamPropertyAll(os As Object, beamNo As Long, sectionName As String) As String
+    Dim width As Double, depth As Double
+    Dim ax As Double, ay As Double, az As Double
+    Dim ix As Double, iy As Double, iz As Double
+    Dim tf As Double, tw As Double
+    Dim thickness As Double
+    Dim outerDiameter As Double
+
+    FormatTubePipeFromBeamPropertyAll = ""
+
+    On Error Resume Next
+    os.Property.GetBeamPropertyAll beamNo, width, depth, ax, ay, az, ix, iy, iz, tf, tw
+    If Err.Number <> 0 Then
+        Err.Clear
+        On Error GoTo 0
+        Exit Function
+    End If
+    On Error GoTo 0
+
+    If IsTubeSectionName(sectionName) Then
+        thickness = MaxD(Abs(tf), Abs(tw))
+        FormatTubePipeFromBeamPropertyAll = FormatTubeSectionName(Abs(depth), Abs(width), thickness)
+    ElseIf IsPipeSectionName(sectionName) Then
+        thickness = MaxD(Abs(tf), Abs(tw))
+        outerDiameter = MaxD(Abs(depth), Abs(width))
+        FormatTubePipeFromBeamPropertyAll = FormatPipeSectionName(outerDiameter, MaxD(outerDiameter - 2# * thickness, 0#))
+    End If
+End Function
+
+Private Function IsTubeSectionName(sectionName As String) As Boolean
+    IsTubeSectionName = (InStr(UCase$(sectionName), "TUBE") > 0 Or _
+                         InStr(UCase$(sectionName), "RHS") > 0 Or _
+                         InStr(UCase$(sectionName), "SHS") > 0)
+End Function
+
+Private Function IsPipeSectionName(sectionName As String) As Boolean
+    IsPipeSectionName = (InStr(UCase$(sectionName), "PIPE") > 0 Or _
+                         InStr(UCase$(sectionName), "CHS") > 0)
+End Function
+
+Private Function FormatTubeSectionName(depth As Double, width As Double, thickness As Double) As String
+    If depth <= 0# Or width <= 0# Or thickness <= 0# Then
+        FormatTubeSectionName = ""
+    Else
+        FormatTubeSectionName = "TUBE (" & FormatMillimeters(depth) & "x" & _
+                                FormatMillimeters(width) & "x" & _
+                                FormatMillimeters(thickness) & ")"
+    End If
+End Function
+
+Private Function FormatPipeSectionName(outerDiameter As Double, innerDiameter As Double) As String
+    If outerDiameter <= 0# Then
+        FormatPipeSectionName = ""
+    Else
+        FormatPipeSectionName = "PIPE (OD " & FormatMillimeters(outerDiameter) & _
+                                " ID " & FormatMillimeters(MaxD(innerDiameter, 0#)) & ")"
+    End If
 End Function
 
 Private Sub GetMemberVisualHalfWidths( _
@@ -1002,6 +1110,10 @@ End Function
 
 Private Function FormatNumberSafe(value As Double) As String
     FormatNumberSafe = Replace$(Format$(value, "0.000"), ",", ".")
+End Function
+
+Private Function FormatMillimeters(value As Double) As String
+    FormatMillimeters = Replace$(Format$(Abs(value) * 1000#, "0.###"), ",", ".")
 End Function
 
 Private Function CleanDXFText(value As String) As String
