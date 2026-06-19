@@ -361,9 +361,9 @@ Private Function FormatMemberLabel(sectionName As String, memberLength As Double
     If memberLength < SHORT_MEMBER_LENGTH And Len(sectionName) > 0 Then
         FormatMemberLabel = sectionName
     ElseIf Len(sectionName) > 0 Then
-        FormatMemberLabel = sectionName & " (" & FormatNumberSafe(memberLength) & " m)"
+        FormatMemberLabel = sectionName & " (" & FormatNumberSafe(memberLength) & "M)"
     Else
-        FormatMemberLabel = "(" & FormatNumberSafe(memberLength) & " m)"
+        FormatMemberLabel = "(" & FormatNumberSafe(memberLength) & "M)"
     End If
 End Function
 
