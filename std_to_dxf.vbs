@@ -357,7 +357,7 @@ End Sub
 
 Private Function FormatMemberLabel(sectionName As String, memberLength As Double) As String
     If Len(sectionName) > 0 Then
-        FormatMemberLabel = sectionName & " (" & FormatNumberSafe(memberLength) & "M)"
+        FormatMemberLabel = sectionName & "\P(" & FormatNumberSafe(memberLength) & "M)"
     Else
         FormatMemberLabel = "(" & FormatNumberSafe(memberLength) & "M)"
     End If
