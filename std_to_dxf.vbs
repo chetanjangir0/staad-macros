@@ -8,6 +8,9 @@ Private Const MIN_LABEL_HEIGHT As Double = 0.05
 Private Const SHORT_MEMBER_LENGTH As Double = 2#
 Private Const LABEL_WIDTH_FACTOR As Double = 0.65
 Private Const LABEL_MAX_SPAN_FACTOR As Double = 0.8
+Private Const LABEL_SECTION_COLOR As Long = 4
+Private Const LABEL_FLANGE_COLOR As Long = 6
+Private Const LABEL_LENGTH_COLOR As Long = 2
 
 Private gViewPlane As String
 Private gLabelTextScale As Double
@@ -1053,6 +1056,8 @@ Private Sub WriteDXFText( _
     Print #f, "TEXT"
     Print #f, "8"
     Print #f, layerName
+    Print #f, "62"
+    Print #f, "7"
     Print #f, "10"
     Print #f, FormatDXF(x)
     Print #f, "20"
@@ -1091,7 +1096,7 @@ Private Sub WriteDXFLabelText( _
     Dim lineOffset As Double
 
     If InStr(value, "\P") = 0 Then
-        WriteDXFText f, layerName, x, y, z, height, rotationDeg, value
+        WriteDXFColoredLabelLine f, layerName, x, y, z, height, rotationDeg, value
         Exit Sub
     End If
 
@@ -1100,8 +1105,108 @@ Private Sub WriteDXFLabelText( _
 
     For i = LBound(lines) To UBound(lines)
         lineOffset = ((CDbl(lineCount - 1) / 2#) - CDbl(i - LBound(lines))) * height * 1.25
-        WriteDXFText f, layerName, x + ox * lineOffset, y + oy * lineOffset, z + oz * lineOffset, height, rotationDeg, lines(i)
+        WriteDXFColoredLabelLine f, layerName, x + ox * lineOffset, y + oy * lineOffset, z + oz * lineOffset, height, rotationDeg, lines(i)
     Next i
+
+End Sub
+
+Private Sub WriteDXFColoredLabelLine( _
+    f As Integer, _
+    layerName As String, _
+    x As Double, y As Double, z As Double, _
+    height As Double, _
+    rotationDeg As Double, _
+    value As String)
+
+    Dim p As Long
+
+    p = InStr(value, "; (")
+    If p > 0 Then
+        WriteDXFColoredTextPart f, layerName, x, y, z, height, rotationDeg, value, Left$(value, p), 1, LABEL_FLANGE_COLOR
+        WriteDXFColoredTextPart f, layerName, x, y, z, height, rotationDeg, value, Mid$(value, p + 1), p + 1, LABEL_LENGTH_COLOR
+        Exit Sub
+    End If
+
+    p = InStrRev(value, " (")
+    If p > 0 Then
+        WriteDXFColoredTextPart f, layerName, x, y, z, height, rotationDeg, value, Left$(value, p - 1), 1, LABEL_SECTION_COLOR
+        WriteDXFColoredTextPart f, layerName, x, y, z, height, rotationDeg, value, Mid$(value, p), p, LABEL_LENGTH_COLOR
+    ElseIf Left$(value, 2) = "2F" Then
+        WriteDXFColoredTextPart f, layerName, x, y, z, height, rotationDeg, value, value, 1, LABEL_FLANGE_COLOR
+    ElseIf Left$(value, 1) = "(" Then
+        WriteDXFColoredTextPart f, layerName, x, y, z, height, rotationDeg, value, value, 1, LABEL_LENGTH_COLOR
+    Else
+        WriteDXFColoredTextPart f, layerName, x, y, z, height, rotationDeg, value, value, 1, LABEL_SECTION_COLOR
+    End If
+
+End Sub
+
+Private Sub WriteDXFColoredTextPart( _
+    f As Integer, _
+    layerName As String, _
+    x As Double, y As Double, z As Double, _
+    height As Double, _
+    rotationDeg As Double, _
+    fullText As String, _
+    partText As String, _
+    startChar As Long, _
+    colorNo As Long)
+
+    Dim cleanFull As String
+    Dim cleanPart As String
+    Dim offsetChars As Double
+    Dim offsetDistance As Double
+    Dim angleRad As Double
+
+    cleanFull = CleanDXFText(fullText)
+    cleanPart = CleanDXFText(partText)
+    If Len(cleanPart) = 0 Then
+        Exit Sub
+    End If
+
+    offsetChars = (CDbl(startChar - 1) + CDbl(Len(cleanPart)) / 2#) - (CDbl(Len(cleanFull)) / 2#)
+    offsetDistance = offsetChars * height * LABEL_WIDTH_FACTOR
+    angleRad = rotationDeg * PI / 180#
+
+    WriteDXFTextColor f, layerName, x + Cos(angleRad) * offsetDistance, y + Sin(angleRad) * offsetDistance, z, height, rotationDeg, cleanPart, colorNo
+
+End Sub
+
+Private Sub WriteDXFTextColor( _
+    f As Integer, _
+    layerName As String, _
+    x As Double, y As Double, z As Double, _
+    height As Double, _
+    rotationDeg As Double, _
+    value As String, _
+    colorNo As Long)
+
+    Print #f, "0"
+    Print #f, "TEXT"
+    Print #f, "8"
+    Print #f, layerName
+    Print #f, "62"
+    Print #f, CStr(colorNo)
+    Print #f, "10"
+    Print #f, FormatDXF(x)
+    Print #f, "20"
+    Print #f, FormatDXF(y)
+    Print #f, "30"
+    Print #f, FormatDXF(z)
+    Print #f, "40"
+    Print #f, FormatDXF(height)
+    Print #f, "1"
+    Print #f, value
+    Print #f, "50"
+    Print #f, FormatDXF(rotationDeg)
+    Print #f, "72"
+    Print #f, "1"
+    Print #f, "11"
+    Print #f, FormatDXF(x)
+    Print #f, "21"
+    Print #f, FormatDXF(y)
+    Print #f, "31"
+    Print #f, FormatDXF(z)
 
 End Sub
 
