@@ -11,6 +11,7 @@ Private Const LABEL_MAX_SPAN_FACTOR As Double = 0.8
 
 Private gViewPlane As String
 Private gLabelTextScale As Double
+Private gWriteLabels As Boolean
 
 Sub Main()
 
@@ -108,6 +109,7 @@ Private Function GetExportSettings(defaultPath As String, ByRef outputPath As St
     fileName = defaultName
     viewPlane = "XY"
     gLabelTextScale = 1#
+    gWriteLabels = True
 
     Set ts = fso.OpenTextFile(resultPath, 1, False)
     Do Until ts.AtEndOfStream
@@ -129,6 +131,8 @@ Private Function GetExportSettings(defaultPath As String, ByRef outputPath As St
                     If IsNumeric(value) Then
                         gLabelTextScale = CDbl(value)
                     End If
+                Case "labels"
+                    gWriteLabels = (value <> "0")
             End Select
         End If
     Loop
@@ -180,7 +184,7 @@ Private Sub WriteSettingsHTA(htaPath As String, resultPath As String, defaultDir
     Print #f, "  document.getElementById(""folder"").Value = """ & EscapeVBString(RemoveTrailingBackslash(defaultDir)) & """"
     Print #f, "  document.getElementById(""filename"").Value = """ & EscapeVBString(defaultName) & """"
     Print #f, "  document.getElementById(""textscale"").Value = ""1.00"""
-    Print #f, "  window.resizeTo 560, 410"
+    Print #f, "  window.resizeTo 560, 435"
     Print #f, "End Sub"
     Print #f, "Sub btnBrowse_OnClick"
     Print #f, "  Dim sh, fld, startFolder"
@@ -190,11 +194,13 @@ Private Sub WriteSettingsHTA(htaPath As String, resultPath As String, defaultDir
     Print #f, "  If Not fld Is Nothing Then document.getElementById(""folder"").Value = fld.Self.Path"
     Print #f, "End Sub"
     Print #f, "Sub btnExport_OnClick"
-    Print #f, "  Dim fso, ts, plane, textScale"
+    Print #f, "  Dim fso, ts, plane, textScale, labels"
     Print #f, "  plane = ""XY"""
     Print #f, "  If document.getElementById(""planeYZ"").Checked Then plane = ""YZ"""
     Print #f, "  If document.getElementById(""planeZX"").Checked Then plane = ""ZX"""
     Print #f, "  textScale = document.getElementById(""textscale"").Value"
+    Print #f, "  labels = ""0"""
+    Print #f, "  If document.getElementById(""labels"").Checked Then labels = ""1"""
     Print #f, "  Set fso = CreateObject(""Scripting.FileSystemObject"")"
     Print #f, "  Set ts = fso.CreateTextFile(RESULT_PATH, True)"
     Print #f, "  ts.WriteLine ""cancelled=0"""
@@ -202,6 +208,7 @@ Private Sub WriteSettingsHTA(htaPath As String, resultPath As String, defaultDir
     Print #f, "  ts.WriteLine ""filename="" & document.getElementById(""filename"").Value"
     Print #f, "  ts.WriteLine ""plane="" & plane"
     Print #f, "  ts.WriteLine ""textscale="" & textScale"
+    Print #f, "  ts.WriteLine ""labels="" & labels"
     Print #f, "  ts.Close"
     Print #f, "  window.close"
     Print #f, "End Sub"
@@ -227,6 +234,7 @@ Private Sub WriteSettingsHTA(htaPath As String, resultPath As String, defaultDir
     Print #f, "<label><input id=""planeYZ"" name=""plane"" type=""radio""> Y-Z</label>"
     Print #f, "<label><input id=""planeZX"" name=""plane"" type=""radio""> Z-X</label>"
     Print #f, "</div>"
+    Print #f, "<label><input id=""labels"" type=""checkbox"" checked> Text labels</label>"
     Print #f, "<label for=""textscale"">Text size scale</label>"
     Print #f, "<input id=""textscale"" type=""text"">"
     Print #f, "<div class=""actions""><button id=""btnCancel"">Cancel</button><button id=""btnExport"">Export</button></div>"
@@ -317,7 +325,9 @@ Private Function ExportMembersToDXF(os As Object, f As Integer) As Long
 
             WriteDXFLine f, "MEMBER_CENTERLINE", x1, y1, z1, x2, y2, z2, "DASHED"
             WriteMemberEnvelope f, x1, y1, z1, x2, y2, z2, startHalfWidth, endHalfWidth, propertyType, sectionName
-            WriteMemberLabel f, x1, y1, z1, x2, y2, z2, labelText, MaxD(startHalfWidth, endHalfWidth)
+            If gWriteLabels Then
+                WriteMemberLabel f, x1, y1, z1, x2, y2, z2, labelText, MaxD(startHalfWidth, endHalfWidth)
+            End If
             ExportMembersToDXF = ExportMembersToDXF + 1
 
         End If
