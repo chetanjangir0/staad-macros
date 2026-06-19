@@ -5,7 +5,6 @@ Private Const MIN_SECTION_HALF_WIDTH As Double = 0.05
 Private Const SECTION_WIDTH_SCALE As Double = 1#
 Private Const LABEL_HEIGHT_FACTOR As Double = 0.035
 Private Const MIN_LABEL_HEIGHT As Double = 0.05
-Private Const SHORT_MEMBER_LENGTH As Double = 2#
 Private Const LABEL_WIDTH_FACTOR As Double = 0.65
 Private Const LABEL_MAX_SPAN_FACTOR As Double = 0.8
 Private Const LABEL_SECTION_COLOR As Long = 4
@@ -317,11 +316,7 @@ Private Function ExportMembersToDXF(os As Object, f As Integer) As Long
             End If
 
             If Len(taperedLabel) > 0 Then
-                If length < SHORT_MEMBER_LENGTH Then
-                    labelText = CompactTaperedLabel(taperedLabel)
-                Else
-                    labelText = taperedLabel
-                End If
+                labelText = taperedLabel
             Else
                 labelText = FormatMemberLabel(sectionName, length)
             End If
@@ -361,22 +356,10 @@ Private Sub MapPointToDXFPlane(ByRef x As Double, ByRef y As Double, ByRef z As 
 End Sub
 
 Private Function FormatMemberLabel(sectionName As String, memberLength As Double) As String
-    If memberLength < SHORT_MEMBER_LENGTH And Len(sectionName) > 0 Then
-        FormatMemberLabel = sectionName
-    ElseIf Len(sectionName) > 0 Then
+    If Len(sectionName) > 0 Then
         FormatMemberLabel = sectionName & " (" & FormatNumberSafe(memberLength) & "M)"
     Else
         FormatMemberLabel = "(" & FormatNumberSafe(memberLength) & "M)"
-    End If
-End Function
-
-Private Function CompactTaperedLabel(labelText As String) As String
-    Dim p As Long
-    p = InStr(labelText, " (")
-    If p > 0 Then
-        CompactTaperedLabel = Left$(labelText, p - 1)
-    Else
-        CompactTaperedLabel = labelText
     End If
 End Function
 
