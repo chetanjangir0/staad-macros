@@ -452,7 +452,7 @@ Private Function FormatTaperedILabel(beamNo As Long, os As Object, memberLength 
     bf = bf * 1000#
     tf = tf * 1000#
 
-    FormatTaperedILabel = "W(" & Format$(d2, "0") & "~" & Format$(d1, "0") & "x" & Format$(tw, "0") & ") " & _
+    FormatTaperedILabel = "W(" & Format$(d2, "0") & "~" & Format$(d1, "0") & "x" & Format$(tw, "0") & ")\P" & _
                           "2F(" & Format$(bf, "0") & "x" & Format$(tf, "0") & "); (" & FormatNumberSafe(memberLength) & " m)"
 End Function
 
@@ -508,7 +508,7 @@ Private Sub WriteMemberLabel( _
 
     rotationDeg = Atn2(ly2 - ly1, lx2 - lx1) * 180# / PI
 
-    WriteDXFText f, "MEMBER_LABELS", mx, my, mz, textHeight, rotationDeg, labelText
+    WriteDXFLabelText f, "MEMBER_LABELS", mx, my, mz, textHeight, rotationDeg, labelText, ox, oy, oz
 
 End Sub
 
@@ -1073,6 +1073,35 @@ Private Sub WriteDXFText( _
     Print #f, FormatDXF(y)
     Print #f, "31"
     Print #f, FormatDXF(z)
+
+End Sub
+
+Private Sub WriteDXFLabelText( _
+    f As Integer, _
+    layerName As String, _
+    x As Double, y As Double, z As Double, _
+    height As Double, _
+    rotationDeg As Double, _
+    value As String, _
+    ox As Double, oy As Double, oz As Double)
+
+    Dim lines() As String
+    Dim i As Long
+    Dim lineCount As Long
+    Dim lineOffset As Double
+
+    If InStr(value, "\P") = 0 Then
+        WriteDXFText f, layerName, x, y, z, height, rotationDeg, value
+        Exit Sub
+    End If
+
+    lines = Split(value, "\P")
+    lineCount = UBound(lines) - LBound(lines) + 1
+
+    For i = LBound(lines) To UBound(lines)
+        lineOffset = ((CDbl(lineCount - 1) / 2#) - CDbl(i - LBound(lines))) * height * 1.25
+        WriteDXFText f, layerName, x + ox * lineOffset, y + oy * lineOffset, z + oz * lineOffset, height, rotationDeg, lines(i)
+    Next i
 
 End Sub
 
