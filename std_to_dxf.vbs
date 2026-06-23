@@ -278,6 +278,7 @@ Private Function ExportMembersToDXF(os As Object, f As Integer) As Long
     Dim startHalfWidth As Double
     Dim endHalfWidth As Double
     Dim labelText As String
+    Dim taperFrameCenterX As Double
 
     nMembers = CLng(os.Geometry.GetNoOfSelectedBeams())
     If nMembers <= 0 Then
@@ -286,6 +287,7 @@ Private Function ExportMembersToDXF(os As Object, f As Integer) As Long
 
     ReDim BeamNos(nMembers - 1)
     os.Geometry.GetSelectedBeams BeamNos, 1
+    taperFrameCenterX = GetSelectedMembersCenterX(os, BeamNos)
 
     For i = 0 To nMembers - 1
 
@@ -322,7 +324,7 @@ Private Function ExportMembersToDXF(os As Object, f As Integer) As Long
             End If
 
             WriteDXFLine f, "MEMBER_CENTERLINE", x1, y1, z1, x2, y2, z2, "DASHED"
-            WriteMemberEnvelope f, x1, y1, z1, x2, y2, z2, startHalfWidth, endHalfWidth, propertyType, sectionName
+            WriteMemberEnvelope f, x1, y1, z1, x2, y2, z2, startHalfWidth, endHalfWidth, propertyType, sectionName, taperFrameCenterX
             If gWriteLabels Then
                 WriteMemberLabel f, x1, y1, z1, x2, y2, z2, labelText, MaxD(startHalfWidth, endHalfWidth)
             End If
@@ -367,6 +369,38 @@ Private Function HasValidMemberIncidence(startNode As Long, endNode As Long) As 
     HasValidMemberIncidence = (startNode > 0 And endNode > 0)
 End Function
 
+Private Function GetSelectedMembersCenterX(os As Object, BeamNos() As Long) As Double
+    Dim i As Long
+    Dim startNode As Long
+    Dim endNode As Long
+    Dim x1 As Double, y1 As Double, z1 As Double
+    Dim x2 As Double, y2 As Double, z2 As Double
+    Dim totalX As Double
+    Dim count As Long
+
+    On Error Resume Next
+    For i = LBound(BeamNos) To UBound(BeamNos)
+        startNode = 0
+        endNode = 0
+        os.Geometry.GetMemberIncidence BeamNos(i), startNode, endNode
+        If HasValidMemberIncidence(startNode, endNode) Then
+            os.Geometry.GetNodeCoordinates startNode, x1, y1, z1
+            os.Geometry.GetNodeCoordinates endNode, x2, y2, z2
+            MapPointToDXFPlane x1, y1, z1
+            MapPointToDXFPlane x2, y2, z2
+            totalX = totalX + (x1 + x2) / 2#
+            count = count + 1
+        End If
+    Next i
+    On Error GoTo 0
+
+    If count > 0 Then
+        GetSelectedMembersCenterX = totalX / count
+    Else
+        GetSelectedMembersCenterX = 0#
+    End If
+End Function
+
 Private Sub WriteMemberEnvelope( _
     f As Integer, _
     x1 As Double, y1 As Double, z1 As Double, _
@@ -374,13 +408,24 @@ Private Sub WriteMemberEnvelope( _
     startHalfWidth As Double, _
     endHalfWidth As Double, _
     propertyType As Long, _
-    sectionName As String)
+    sectionName As String, _
+    taperFrameCenterX As Double)
 
     Dim ox1 As Double, oy1 As Double, oz1 As Double
     Dim ox2 As Double, oy2 As Double, oz2 As Double
+    Dim ux As Double, uy As Double, uz As Double
     Dim layerName As String
+    Dim isTapered As Boolean
+    Dim fixedSideSign As Double
+    Dim startFixedOffset As Double
+    Dim endFixedOffset As Double
+    Dim startTaperedOffset As Double
+    Dim endTaperedOffset As Double
 
     GetViewOffsetVector x1, y1, z1, x2, y2, z2, ox1, oy1, oz1
+    ux = ox1
+    uy = oy1
+    uz = oz1
 
     ox2 = ox1 * endHalfWidth
     oy2 = oy1 * endHalfWidth
@@ -395,21 +440,70 @@ Private Sub WriteMemberEnvelope( _
         layerName = "TUBE_PIPE_SECTION"
     End If
 
-    If IsTaperedSection(propertyType, sectionName, startHalfWidth, endHalfWidth) Then
+    isTapered = IsTaperedSection(propertyType, sectionName, startHalfWidth, endHalfWidth)
+
+    If isTapered Then
         layerName = "TAPERED_SECTION"
     End If
 
-    WriteDXFLine f, layerName, x1 + ox1, y1 + oy1, z1 + oz1, x2 + ox2, y2 + oy2, z2 + oz2, "CONTINUOUS"
-    WriteDXFLine f, layerName, x1 - ox1, y1 - oy1, z1 - oz1, x2 - ox2, y2 - oy2, z2 - oz2, "CONTINUOUS"
-    WriteDXFLine f, layerName, x1 + ox1, y1 + oy1, z1 + oz1, x1 - ox1, y1 - oy1, z1 - oz1, "CONTINUOUS"
-    WriteDXFLine f, layerName, x2 + ox2, y2 + oy2, z2 + oz2, x2 - ox2, y2 - oy2, z2 - oz2, "CONTINUOUS"
+    If isTapered Then
+        fixedSideSign = GetTaperFixedSideSign(x1, y1, x2, y2, ux, uy, taperFrameCenterX)
+        startFixedOffset = fixedSideSign * MaxD(startHalfWidth, endHalfWidth)
+        endFixedOffset = startFixedOffset
+        startTaperedOffset = startFixedOffset - fixedSideSign * startHalfWidth * 2#
+        endTaperedOffset = endFixedOffset - fixedSideSign * endHalfWidth * 2#
 
-    If IsTubeOrPipeSection(propertyType, sectionName) Then
+        WriteDXFLine f, layerName, x1 + ux * startFixedOffset, y1 + uy * startFixedOffset, z1 + uz * startFixedOffset, x2 + ux * endFixedOffset, y2 + uy * endFixedOffset, z2 + uz * endFixedOffset, "CONTINUOUS"
+        WriteDXFLine f, layerName, x1 + ux * startTaperedOffset, y1 + uy * startTaperedOffset, z1 + uz * startTaperedOffset, x2 + ux * endTaperedOffset, y2 + uy * endTaperedOffset, z2 + uz * endTaperedOffset, "CONTINUOUS"
+        WriteDXFLine f, layerName, x1 + ux * startFixedOffset, y1 + uy * startFixedOffset, z1 + uz * startFixedOffset, x1 + ux * startTaperedOffset, y1 + uy * startTaperedOffset, z1 + uz * startTaperedOffset, "CONTINUOUS"
+        WriteDXFLine f, layerName, x2 + ux * endFixedOffset, y2 + uy * endFixedOffset, z2 + uz * endFixedOffset, x2 + ux * endTaperedOffset, y2 + uy * endTaperedOffset, z2 + uz * endTaperedOffset, "CONTINUOUS"
+    Else
+        WriteDXFLine f, layerName, x1 + ox1, y1 + oy1, z1 + oz1, x2 + ox2, y2 + oy2, z2 + oz2, "CONTINUOUS"
+        WriteDXFLine f, layerName, x1 - ox1, y1 - oy1, z1 - oz1, x2 - ox2, y2 - oy2, z2 - oz2, "CONTINUOUS"
+        WriteDXFLine f, layerName, x1 + ox1, y1 + oy1, z1 + oz1, x1 - ox1, y1 - oy1, z1 - oz1, "CONTINUOUS"
+        WriteDXFLine f, layerName, x2 + ox2, y2 + oy2, z2 + oz2, x2 - ox2, y2 - oy2, z2 - oz2, "CONTINUOUS"
+    End If
+
+    If IsTubeOrPipeSection(propertyType, sectionName) And Not isTapered Then
         WriteDXFLine f, "TUBE_PIPE_SECTION", x1 + ox1 * 0.65, y1 + oy1 * 0.65, z1 + oz1 * 0.65, x2 + ox2 * 0.65, y2 + oy2 * 0.65, z2 + oz2 * 0.65, "HIDDEN"
         WriteDXFLine f, "TUBE_PIPE_SECTION", x1 - ox1 * 0.65, y1 - oy1 * 0.65, z1 - oz1 * 0.65, x2 - ox2 * 0.65, y2 - oy2 * 0.65, z2 - oz2 * 0.65, "HIDDEN"
     End If
 
 End Sub
+
+Private Function GetTaperFixedSideSign( _
+    x1 As Double, y1 As Double, _
+    x2 As Double, y2 As Double, _
+    ox As Double, oy As Double, _
+    frameCenterX As Double) As Double
+
+    Dim dx As Double
+    Dim dy As Double
+    Dim desiredX As Double
+
+    dx = x2 - x1
+    dy = y2 - y1
+
+    If Abs(dy) > Abs(dx) * 1.5 Then
+        If (x1 + x2) / 2# < frameCenterX Then
+            desiredX = -1#
+        Else
+            desiredX = 1#
+        End If
+
+        If ox * desiredX >= 0# Then
+            GetTaperFixedSideSign = 1#
+        Else
+            GetTaperFixedSideSign = -1#
+        End If
+    Else
+        If oy >= 0# Then
+            GetTaperFixedSideSign = 1#
+        Else
+            GetTaperFixedSideSign = -1#
+        End If
+    End If
+End Function
 
 Private Function FormatTaperedILabel(beamNo As Long, os As Object, memberLength As Double, propertyType As Long, propValues() As Double) As String
     Dim d1 As Double, d2 As Double
