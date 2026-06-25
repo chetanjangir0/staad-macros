@@ -277,6 +277,7 @@ Private Function ExportMembersToDXF(os As Object, f As Integer) As Long
     Dim propertyType As Long
     Dim startHalfWidth As Double
     Dim endHalfWidth As Double
+    Dim fixedHalfWidth As Double
     Dim labelText As String
     Dim taperFrameCenterX As Double
 
@@ -307,6 +308,7 @@ Private Function ExportMembersToDXF(os As Object, f As Integer) As Long
             sectionName = GetMemberSectionDisplayName(os, BeamNos(i))
             GetMemberVisualHalfWidths os, BeamNos(i), length, startHalfWidth, endHalfWidth, propertyType
             sectionName = FormatTubePipeSectionName(os, BeamNos(i), propertyType, sectionName)
+            fixedHalfWidth = GetConnectedTaperFixedHalfWidth(os, BeamNos, i, startHalfWidth, endHalfWidth, propertyType, sectionName)
 
             Dim taperedLabel As String
             Dim pv(23) As Double
@@ -324,7 +326,7 @@ Private Function ExportMembersToDXF(os As Object, f As Integer) As Long
             End If
 
             WriteDXFLine f, "MEMBER_CENTERLINE", x1, y1, z1, x2, y2, z2, "DASHED"
-            WriteMemberEnvelope f, x1, y1, z1, x2, y2, z2, startHalfWidth, endHalfWidth, propertyType, sectionName, taperFrameCenterX
+            WriteMemberEnvelope f, x1, y1, z1, x2, y2, z2, startHalfWidth, endHalfWidth, fixedHalfWidth, propertyType, sectionName, taperFrameCenterX
             If gWriteLabels Then
                 WriteMemberLabel f, x1, y1, z1, x2, y2, z2, labelText, MaxD(startHalfWidth, endHalfWidth)
             End If
@@ -334,6 +336,128 @@ Private Function ExportMembersToDXF(os As Object, f As Integer) As Long
 
     Next i
 
+End Function
+
+Private Function GetConnectedTaperFixedHalfWidth( _
+    os As Object, _
+    BeamNos() As Long, _
+    targetIndex As Long, _
+    targetStartHalfWidth As Double, _
+    targetEndHalfWidth As Double, _
+    targetPropertyType As Long, _
+    targetSectionName As String) As Double
+
+    Dim included() As Boolean
+    Dim changed As Boolean
+    Dim i As Long
+    Dim j As Long
+    Dim startNodeI As Long
+    Dim endNodeI As Long
+    Dim startNodeJ As Long
+    Dim endNodeJ As Long
+    Dim x1 As Double, y1 As Double, z1 As Double
+    Dim x2 As Double, y2 As Double, z2 As Double
+    Dim x3 As Double, y3 As Double, z3 As Double
+    Dim x4 As Double, y4 As Double, z4 As Double
+    Dim memberLength As Double
+    Dim startHalfWidth As Double
+    Dim endHalfWidth As Double
+    Dim propertyType As Long
+    Dim sectionName As String
+
+    GetConnectedTaperFixedHalfWidth = MaxD(targetStartHalfWidth, targetEndHalfWidth)
+    If Not IsTaperedSection(targetPropertyType, targetSectionName, targetStartHalfWidth, targetEndHalfWidth) Then
+        Exit Function
+    End If
+
+    ReDim included(LBound(BeamNos) To UBound(BeamNos))
+    included(targetIndex) = True
+
+    Do
+        changed = False
+        For i = LBound(BeamNos) To UBound(BeamNos)
+            If included(i) Then
+                startNodeI = 0
+                endNodeI = 0
+                os.Geometry.GetMemberIncidence BeamNos(i), startNodeI, endNodeI
+                os.Geometry.GetNodeCoordinates startNodeI, x1, y1, z1
+                os.Geometry.GetNodeCoordinates endNodeI, x2, y2, z2
+                MapPointToDXFPlane x1, y1, z1
+                MapPointToDXFPlane x2, y2, z2
+
+                For j = LBound(BeamNos) To UBound(BeamNos)
+                    If Not included(j) Then
+                        startNodeJ = 0
+                        endNodeJ = 0
+                        os.Geometry.GetMemberIncidence BeamNos(j), startNodeJ, endNodeJ
+                        If MembersShareNode(startNodeI, endNodeI, startNodeJ, endNodeJ) Then
+                            os.Geometry.GetNodeCoordinates startNodeJ, x3, y3, z3
+                            os.Geometry.GetNodeCoordinates endNodeJ, x4, y4, z4
+                            MapPointToDXFPlane x3, y3, z3
+                            MapPointToDXFPlane x4, y4, z4
+
+                            If AreMemberDirectionsParallel(x1, y1, x2, y2, x3, y3, x4, y4) Then
+                                memberLength = GetMemberLength(os, BeamNos(j), x3, y3, z3, x4, y4, z4)
+                                sectionName = GetMemberSectionDisplayName(os, BeamNos(j))
+                                GetMemberVisualHalfWidths os, BeamNos(j), memberLength, startHalfWidth, endHalfWidth, propertyType
+                                If IsTaperedSection(propertyType, sectionName, startHalfWidth, endHalfWidth) Then
+                                    included(j) = True
+                                    changed = True
+                                End If
+                            End If
+                        End If
+                    End If
+                Next j
+            End If
+        Next i
+    Loop While changed
+
+    For i = LBound(BeamNos) To UBound(BeamNos)
+        If included(i) Then
+            startNodeI = 0
+            endNodeI = 0
+            os.Geometry.GetMemberIncidence BeamNos(i), startNodeI, endNodeI
+            os.Geometry.GetNodeCoordinates startNodeI, x1, y1, z1
+            os.Geometry.GetNodeCoordinates endNodeI, x2, y2, z2
+            memberLength = GetMemberLength(os, BeamNos(i), x1, y1, z1, x2, y2, z2)
+            sectionName = GetMemberSectionDisplayName(os, BeamNos(i))
+            GetMemberVisualHalfWidths os, BeamNos(i), memberLength, startHalfWidth, endHalfWidth, propertyType
+            GetConnectedTaperFixedHalfWidth = MaxD(GetConnectedTaperFixedHalfWidth, MaxD(startHalfWidth, endHalfWidth))
+        End If
+    Next i
+End Function
+
+Private Function MembersShareNode(startNode1 As Long, endNode1 As Long, startNode2 As Long, endNode2 As Long) As Boolean
+    MembersShareNode = (startNode1 = startNode2 Or startNode1 = endNode2 Or endNode1 = startNode2 Or endNode1 = endNode2)
+End Function
+
+Private Function AreMemberDirectionsParallel( _
+    x1 As Double, y1 As Double, _
+    x2 As Double, y2 As Double, _
+    x3 As Double, y3 As Double, _
+    x4 As Double, y4 As Double) As Boolean
+
+    Dim dx1 As Double
+    Dim dy1 As Double
+    Dim dx2 As Double
+    Dim dy2 As Double
+    Dim length1 As Double
+    Dim length2 As Double
+    Dim directionDot As Double
+
+    dx1 = x2 - x1
+    dy1 = y2 - y1
+    dx2 = x4 - x3
+    dy2 = y4 - y3
+    length1 = Sqr(dx1 * dx1 + dy1 * dy1)
+    length2 = Sqr(dx2 * dx2 + dy2 * dy2)
+
+    If length1 <= 0.000001 Or length2 <= 0.000001 Then
+        Exit Function
+    End If
+
+    directionDot = Abs((dx1 * dx2 + dy1 * dy2) / (length1 * length2))
+    AreMemberDirectionsParallel = (directionDot >= 0.9999)
 End Function
 
 Private Sub MapPointToDXFPlane(ByRef x As Double, ByRef y As Double, ByRef z As Double)
@@ -407,6 +531,7 @@ Private Sub WriteMemberEnvelope( _
     x2 As Double, y2 As Double, z2 As Double, _
     startHalfWidth As Double, _
     endHalfWidth As Double, _
+    fixedHalfWidth As Double, _
     propertyType As Long, _
     sectionName As String, _
     taperFrameCenterX As Double)
@@ -448,7 +573,7 @@ Private Sub WriteMemberEnvelope( _
 
     If isTapered Then
         fixedSideSign = GetTaperFixedSideSign(x1, y1, x2, y2, ux, uy, taperFrameCenterX)
-        startFixedOffset = fixedSideSign * MaxD(startHalfWidth, endHalfWidth)
+        startFixedOffset = fixedSideSign * fixedHalfWidth
         endFixedOffset = startFixedOffset
         startTaperedOffset = startFixedOffset - fixedSideSign * startHalfWidth * 2#
         endTaperedOffset = endFixedOffset - fixedSideSign * endHalfWidth * 2#
