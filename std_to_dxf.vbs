@@ -5,11 +5,12 @@ Private Const MIN_SECTION_HALF_WIDTH As Double = 0.05
 Private Const SECTION_WIDTH_SCALE As Double = 1#
 Private Const LABEL_HEIGHT_FACTOR As Double = 0.035
 Private Const MIN_LABEL_HEIGHT As Double = 0.05
-Private Const LABEL_WIDTH_FACTOR As Double = 0.65
+Private Const LABEL_WIDTH_FACTOR As Double = 0.7
 Private Const LABEL_MAX_SPAN_FACTOR As Double = 0.8
-Private Const LABEL_SECTION_COLOR As Long = 4
-Private Const LABEL_FLANGE_COLOR As Long = 6
-Private Const LABEL_LENGTH_COLOR As Long = 2
+Private Const LABEL_PART_GAP_FACTOR As Double = 0.2
+Private Const LABEL_SECTION_COLOR As Long = 32
+Private Const LABEL_FLANGE_COLOR As Long = 32
+Private Const LABEL_LENGTH_COLOR As Long = 9
 
 Private gViewPlane As String
 Private gLabelTextScale As Double
@@ -1368,6 +1369,13 @@ Private Sub WriteDXFColoredTextPart( _
 
     offsetChars = (CDbl(startChar - 1) + CDbl(Len(cleanPart)) / 2#) - (CDbl(Len(cleanFull)) / 2#)
     offsetDistance = offsetChars * height * LABEL_WIDTH_FACTOR
+    If Len(cleanPart) < Len(cleanFull) Then
+        If startChar <= 1 Then
+            offsetDistance = offsetDistance - height * LABEL_PART_GAP_FACTOR / 2#
+        Else
+            offsetDistance = offsetDistance + height * LABEL_PART_GAP_FACTOR / 2#
+        End If
+    End If
     angleRad = rotationDeg * PI / 180#
 
     WriteDXFTextColor f, layerName, x + Cos(angleRad) * offsetDistance, y + Sin(angleRad) * offsetDistance, z, height, rotationDeg, cleanPart, colorNo
