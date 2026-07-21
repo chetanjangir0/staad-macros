@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "staad-ext"
+version = "0.1.0"
+description = "A collection of useful STAAD.Pro 2025 extensions."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["comtypes>=1.4.8; platform_system == 'Windows'"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+staad-ext = "staad_ext.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,3 +1,17 @@
 tmp/
 backups/
 open_staad_api_documentation/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+build/
+dist/
+
+# Generated STAAD_EXT output
+STAAD_EXT/*.dxf

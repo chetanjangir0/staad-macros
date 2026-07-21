@@ -2,6 +2,7 @@
 - before writing anything make sure that it is correct syntax and method according to the staad pro 2025 api and documentation
 
 - The documentation folder doesn't include how to use api with python but here is the way to make it work
+- also give me a conventinal commit style commit message for git after anything you work on
 
 OS. Interpreting OpenSTAAD API Syntax for Python
 The functions documented for the OpenSTAAD are given in the C++ syntax. It’s typically a simple process to interpret these for use in a Python program.
