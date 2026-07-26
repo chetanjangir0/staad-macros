@@ -36,18 +36,25 @@ jobs:
       - name: Build executable
         run: pyinstaller --noconfirm --clean STAAD_EXT.spec
 
-      - name: Create checksum
+      - name: Package executable and create checksum
         shell: pwsh
         run: |
-          (Get-FileHash "dist\STAAD_EXT.exe" -Algorithm SHA256).Hash.ToLower() +
-            "  STAAD_EXT.exe" |
-            Set-Content "dist\STAAD_EXT.exe.sha256" -Encoding ascii
+          Compress-Archive `
+            -Path "dist\STAAD_EXT\*" `
+            -DestinationPath "dist\STAAD_EXT-windows-x64.zip"
+          (Get-FileHash `
+            "dist\STAAD_EXT-windows-x64.zip" `
+            -Algorithm SHA256).Hash.ToLower() +
+            "  STAAD_EXT-windows-x64.zip" |
+            Set-Content `
+              "dist\STAAD_EXT-windows-x64.zip.sha256" `
+              -Encoding ascii
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            STAAD_EXT/dist/STAAD_EXT.exe
-            STAAD_EXT/dist/STAAD_EXT.exe.sha256
+            STAAD_EXT/dist/STAAD_EXT-windows-x64.zip
+            STAAD_EXT/dist/STAAD_EXT-windows-x64.zip.sha256
           generate_release_notes: true
           fail_on_unmatched_files: true

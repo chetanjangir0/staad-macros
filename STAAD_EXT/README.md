@@ -42,12 +42,16 @@ new one.
 
 Pushing a version tag such as `v0.1.0` runs the
 `Release Windows executable` GitHub Actions workflow. It tests the project,
-builds `STAAD_EXT.exe`, creates a SHA-256 checksum, and attaches both files to a
-new GitHub release. No repository secrets are required.
+builds the application in one-folder mode, creates a ZIP and SHA-256 checksum,
+and attaches both files to a new GitHub release. No repository secrets are
+required. Download and extract `STAAD_EXT-windows-x64.zip`, then run
+`STAAD_EXT.exe` from the extracted folder.
 
 The executable is not code-signed. Windows may therefore display an
 `Unknown publisher` or Microsoft Defender SmartScreen warning when it is
-downloaded or launched.
+downloaded or launched. The one-folder package avoids the self-extracting
+behavior of a one-file PyInstaller build and disables UPX compression, reducing
+common antivirus heuristic triggers.
 
 To test the packaging locally:
 
