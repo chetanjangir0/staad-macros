@@ -12,6 +12,7 @@ dependencies = ["comtypes>=1.4.8; platform_system == 'Windows'"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+release = ["pyinstaller>=6.10"]
 
 [project.scripts]
 staad-ext = "staad_ext.cli:main"

@@ -1,0 +1,53 @@
+name: Release Windows executable
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    name: Build and release
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: STAAD_EXT
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: STAAD_EXT/pyproject.toml
+
+      - name: Install build and test dependencies
+        run: python -m pip install --upgrade pip pyinstaller .[dev]
+
+      - name: Run tests
+        run: python -m pytest
+
+      - name: Build executable
+        run: pyinstaller --noconfirm --clean STAAD_EXT.spec
+
+      - name: Create checksum
+        shell: pwsh
+        run: |
+          (Get-FileHash "dist\STAAD_EXT.exe" -Algorithm SHA256).Hash.ToLower() +
+            "  STAAD_EXT.exe" |
+            Set-Content "dist\STAAD_EXT.exe.sha256" -Encoding ascii
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            STAAD_EXT/dist/STAAD_EXT.exe
+            STAAD_EXT/dist/STAAD_EXT.exe.sha256
+          generate_release_notes: true
+          fail_on_unmatched_files: true

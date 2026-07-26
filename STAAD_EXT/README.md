@@ -37,3 +37,21 @@ new one.
 - `staad_ext.dxf`: dependency-free ASCII DXF writer
 - `staad_ext.macros`: individual user-facing macros
 - `tests`: unit tests that do not require STAAD.Pro
+
+## Windows releases
+
+Pushing a version tag such as `v0.1.0` runs the
+`Release Windows executable` GitHub Actions workflow. It tests the project,
+builds `STAAD_EXT.exe`, creates a SHA-256 checksum, and attaches both files to a
+new GitHub release. No repository secrets are required.
+
+The executable is not code-signed. Windows may therefore display an
+`Unknown publisher` or Microsoft Defender SmartScreen warning when it is
+downloaded or launched.
+
+To test the packaging locally:
+
+```powershell
+python -m pip install -e ".[dev,release]"
+pyinstaller --noconfirm --clean STAAD_EXT.spec
+```
