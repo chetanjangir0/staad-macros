@@ -16,6 +16,9 @@ dev = ["pytest>=8.0"]
 [project.scripts]
 staad-ext = "staad_ext.cli:main"
 
+[project.gui-scripts]
+staad-ext-gui = "staad_ext.application:launch"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
