@@ -258,6 +258,59 @@ def _apply_column_rafter_join(
     return True
 
 
+def _rafter_rises_to_joint(centerline: tuple[Point3D, Point3D], end: int,
+                            joint: Point3D) -> bool:
+    far = centerline[1 - end]
+    return far.y < joint.y - 1e-9 and abs(far.x - joint.x) > 1e-9
+
+
+def _apply_rafter_ridge_join(outlines: dict[int, list[Point3D]],
+                              centerlines: dict[int, tuple[Point3D, Point3D]],
+                              first: tuple[int, int], second: tuple[int, int],
+                              column: tuple[int, int] | None = None) -> set[tuple[int, int]]:
+    """Create one vertical ridge cap and stop an optional column at the soffit."""
+    beam_a, end_a = first
+    beam_b, end_b = second
+    joint = centerlines[beam_a][end_a]
+    vertical = (Point3D(joint.x, joint.y - 1), Point3D(joint.x, joint.y + 1))
+    ridge_points: list[list[Point3D]] = []
+    for beam in (beam_a, beam_b):
+        outline = outlines[beam]
+        a = _line_intersection(outline[0], outline[1], *vertical)
+        b = _line_intersection(outline[2], outline[3], *vertical)
+        if a is None or b is None:
+            return set()
+        ridge_points.append([a, b])
+    top = Point3D(joint.x, max(p.y for pair in ridge_points for p in pair))
+    bottom = Point3D(joint.x, min(p.y for pair in ridge_points for p in pair))
+    for (beam, end), points in zip((first, second), ridge_points):
+        indices = (0, 2) if end == 0 else (1, 3)
+        top_side = 0 if points[0].y >= points[1].y else 1
+        outlines[beam][indices[top_side]] = top
+        outlines[beam][indices[1 - top_side]] = bottom
+    open_ends = {(beam_b, end_b)}
+    if column is None:
+        return open_ends
+    column_beam, column_end = column
+    column_outline = outlines[column_beam]
+    column_indices = (0, 2) if column_end == 0 else (1, 3)
+    for side, column_index in enumerate(column_indices):
+        column_line = ((column_outline[0], column_outline[1]) if side == 0
+                       else (column_outline[2], column_outline[3]))
+        flange_x = column_outline[column_index].x
+        rafter_beam, rafter_end = min(
+            (first, second),
+            key=lambda item: abs(centerlines[item[0]][1 - item[1]].x - flange_x),
+        )
+        rafter = outlines[rafter_beam]
+        rafter_lines = ((rafter[0], rafter[1]), (rafter[2], rafter[3]))
+        bottom_line = min(rafter_lines, key=lambda line: (line[0].y + line[1].y) / 2)
+        intersection = _line_intersection(*column_line, *bottom_line)
+        if intersection is not None:
+            column_outline[column_index] = intersection
+    open_ends.add((column_beam, column_end))
+    return open_ends
+
 def apply_peb_corner_joins(
     outlines: dict[int, list[Point3D]],
     incidences: dict[int, tuple[int, int]],
@@ -271,6 +324,21 @@ def apply_peb_corner_joins(
         by_node.setdefault(nodes[1], []).append((beam, 1))
 
     for connections in by_node.values():
+        if len(connections) not in (2, 3):
+            continue
+        joint = centerlines[connections[0][0]][connections[0][1]]
+        rafters = [item for item in connections
+                   if not _is_column(centerlines[item[0]])
+                   and _rafter_rises_to_joint(centerlines[item[0]], item[1], joint)]
+        columns = [item for item in connections if _is_column(centerlines[item[0]])]
+        if len(rafters) == 2 and len(columns) == len(connections) - 2:
+            far_x = [centerlines[beam][1 - end].x for beam, end in rafters]
+            if (far_x[0] - joint.x) * (far_x[1] - joint.x) < 0:
+                open_ends.update(_apply_rafter_ridge_join(
+                    outlines, centerlines, rafters[0], rafters[1],
+                    columns[0] if columns else None,
+                ))
+                continue
         if len(connections) != 2:
             continue
         (beam_a, end_a), (beam_b, end_b) = connections

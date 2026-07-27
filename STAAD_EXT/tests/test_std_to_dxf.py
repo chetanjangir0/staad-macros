@@ -81,3 +81,25 @@ def test_peb_corner_join_preserves_caps_at_same_slope_section_changes() -> None:
 
     assert open_ends == set()
     assert outlines == original
+
+
+def test_peb_ridge_join_creates_one_vertical_cap() -> None:
+    outlines = {1: [Point3D(0, 3.8), Point3D(5, 4.8), Point3D(0, 4.2), Point3D(5, 5.2)],
+                2: [Point3D(5, 5.2), Point3D(10, 4.2), Point3D(5, 4.8), Point3D(10, 3.8)]}
+    open_ends = apply_peb_corner_joins(outlines, {1: (1, 2), 2: (2, 3)},
+        {1: (Point3D(0, 4), Point3D(5, 5)), 2: (Point3D(5, 5), Point3D(10, 4))})
+    assert outlines[1][3] == outlines[2][0] == Point3D(5, 5.2)
+    assert outlines[1][1] == outlines[2][2] == Point3D(5, 4.8)
+    assert open_ends == {(2, 0)}
+
+
+def test_peb_ridge_column_stops_at_rafter_bottom_chords() -> None:
+    outlines = {1: [Point3D(0, 3.8), Point3D(5, 4.8), Point3D(0, 4.2), Point3D(5, 5.2)],
+                2: [Point3D(5, 5.2), Point3D(10, 4.2), Point3D(5, 4.8), Point3D(10, 3.8)],
+                3: [Point3D(4.8, 0), Point3D(4.8, 5), Point3D(5.2, 0), Point3D(5.2, 5)]}
+    open_ends = apply_peb_corner_joins(outlines, {1: (1, 2), 2: (2, 3), 3: (4, 2)},
+        {1: (Point3D(0, 4), Point3D(5, 5)), 2: (Point3D(5, 5), Point3D(10, 4)),
+         3: (Point3D(5, 0), Point3D(5, 5))})
+    assert round(outlines[3][1].y, 6) == 4.76
+    assert round(outlines[3][3].y, 6) == 4.76
+    assert open_ends == {(2, 0), (3, 1)}
