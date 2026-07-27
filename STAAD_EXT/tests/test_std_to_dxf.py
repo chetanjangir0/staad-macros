@@ -121,3 +121,19 @@ def test_peb_column_priority_applies_to_multiple_non_ridge_members() -> None:
     assert round(outlines[3][0].x, 6) == 0.2
     assert round(outlines[3][2].x, 6) == -0.2
     assert open_ends == {(1, 1), (2, 0), (3, 0)}
+
+def test_peb_horizontal_beam_stops_at_continuous_column_flange() -> None:
+    outlines = {
+        1: [Point3D(-0.2, 0), Point3D(-0.2, 2), Point3D(0.2, 0), Point3D(0.2, 2)],
+        2: [Point3D(-0.2, 2), Point3D(-0.2, 4), Point3D(0.2, 2), Point3D(0.2, 4)],
+        3: [Point3D(0, 2.1), Point3D(5, 2.1), Point3D(0, 1.9), Point3D(5, 1.9)],
+    }
+    open_ends = apply_peb_corner_joins(
+        outlines, {1: (1, 2), 2: (2, 3), 3: (2, 4)},
+        {1: (Point3D(0, 0), Point3D(0, 2)),
+         2: (Point3D(0, 2), Point3D(0, 4)),
+         3: (Point3D(0, 2), Point3D(5, 2))},
+    )
+    assert outlines[3][0] == Point3D(0.2, 2.1)
+    assert outlines[3][2] == Point3D(0.2, 1.9)
+    assert open_ends == {(1, 1), (2, 0), (3, 0)}

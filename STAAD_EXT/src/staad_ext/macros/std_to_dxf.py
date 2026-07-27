@@ -311,6 +311,36 @@ def _apply_rafter_ridge_join(outlines: dict[int, list[Point3D]],
     open_ends.add((column_beam, column_end))
     return open_ends
 
+def _apply_continuous_column_join(
+    outlines: dict[int, list[Point3D]],
+    centerlines: dict[int, tuple[Point3D, Point3D]],
+    columns: list[tuple[int, int]],
+    members: list[tuple[int, int]],
+) -> set[tuple[int, int]]:
+    """Stop framing members at the near flange of a continuous column."""
+    open_ends = set(columns)
+    column_lines = []
+    for column_beam, _ in columns:
+        outline = outlines[column_beam]
+        column_lines.extend(((outline[0], outline[1]), (outline[2], outline[3])))
+
+    for member_beam, member_end in members:
+        member = outlines[member_beam]
+        member_indices = (0, 2) if member_end == 0 else (1, 3)
+        far = centerlines[member_beam][1 - member_end]
+        near_flange = min(
+            column_lines,
+            key=lambda line: abs((line[0].x + line[1].x) / 2 - far.x),
+        )
+        member_lines = ((member[0], member[1]), (member[2], member[3]))
+        intersections = [_line_intersection(*line, *near_flange) for line in member_lines]
+        if any(point is None for point in intersections):
+            continue
+        for index, point in zip(member_indices, intersections):
+            member[index] = point
+        open_ends.add((member_beam, member_end))
+    return open_ends
+
 def apply_peb_corner_joins(
     outlines: dict[int, list[Point3D]],
     incidences: dict[int, tuple[int, int]],
@@ -340,6 +370,18 @@ def apply_peb_corner_joins(
                 ))
                 continue
         non_columns = [item for item in connections if item not in columns]
+        if len(columns) >= 2 and non_columns:
+            column_far_points = [centerlines[beam][1 - end] for beam, end in columns]
+            spans_joint = any(
+                (first.y - joint.y) * (second.y - joint.y) < 0
+                for index, first in enumerate(column_far_points)
+                for second in column_far_points[index + 1:]
+            )
+            if spans_joint:
+                open_ends.update(_apply_continuous_column_join(
+                    outlines, centerlines, columns, non_columns,
+                ))
+                continue
         if len(columns) == 1 and non_columns:
             column_beam, column_end = columns[0]
             column_outline = outlines[column_beam]
