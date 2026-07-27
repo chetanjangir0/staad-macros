@@ -38,7 +38,7 @@ def test_peb_corner_join_extends_rafter_edges_to_column_flange_lines() -> None:
             Point3D(0.1, 3.8), Point3D(5.1, 4.8),
         ],
     }
-    apply_peb_corner_joins(
+    open_ends = apply_peb_corner_joins(
         outlines,
         {1: (1, 2), 2: (2, 3)},
         {
@@ -47,7 +47,37 @@ def test_peb_corner_join_extends_rafter_edges_to_column_flange_lines() -> None:
         },
     )
 
-    rafter_join = {outlines[2][0], outlines[2][2]}
-    assert {round(point.x, 6) for point in rafter_join} == {-0.2, 0.2}
-    assert outlines[1][1] in rafter_join
-    assert outlines[1][3] in rafter_join
+    # Top rafter line reaches the outside flange; its bottom stops at the inside flange.
+    assert outlines[2][0].x == -0.2
+    assert round(outlines[2][0].y, 6) == 4.18
+    assert outlines[2][2].x == 0.2
+    assert round(outlines[2][2].y, 6) == 3.82
+    # The inside column flange has priority and continues up to the top rafter line.
+    assert round(outlines[1][3].x, 6) == 0.2
+    assert round(outlines[1][3].y, 6) == 4.26
+    assert open_ends == {(1, 1), (2, 0)}
+
+def test_peb_corner_join_preserves_caps_at_same_slope_section_changes() -> None:
+    outlines = {
+        1: [
+            Point3D(0.04, -0.2), Point3D(5.04, 0.8),
+            Point3D(-0.04, 0.2), Point3D(4.96, 1.2),
+        ],
+        2: [
+            Point3D(4.94, 1.3), Point3D(9.94, 2.3),
+            Point3D(5.06, 0.7), Point3D(10.06, 1.7),
+        ],
+    }
+    original = {beam: points.copy() for beam, points in outlines.items()}
+
+    open_ends = apply_peb_corner_joins(
+        outlines,
+        {1: (1, 2), 2: (2, 3)},
+        {
+            1: (Point3D(0, 0), Point3D(5, 1)),
+            2: (Point3D(5, 1), Point3D(10, 2)),
+        },
+    )
+
+    assert open_ends == set()
+    assert outlines == original

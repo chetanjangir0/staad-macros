@@ -169,12 +169,17 @@ def _envelope_points(start: Point3D, end: Point3D, envelope: SectionEnvelope,
 
 
 def _write_envelope(writer: DxfWriter, outline: list[Point3D], envelope: SectionEnvelope,
-                    name: str) -> None:
+                    name: str, open_start: bool = False, open_end: bool = False) -> None:
     p1, p2, p3, p4 = outline
     layer = "TUBE_PIPE_SECTION" if is_tube_or_pipe(envelope.property_type, name) else "MEMBER_SECTION"
     if is_tapered(envelope, name):
         layer = "TAPERED_SECTION"
-    for a, b in ((p1, p2), (p3, p4), (p1, p3), (p2, p4)):
+    edges = [(p1, p2), (p3, p4)]
+    if not open_start:
+        edges.append((p1, p3))
+    if not open_end:
+        edges.append((p2, p4))
+    for a, b in edges:
         _line(writer, layer, a, b)
     if is_tube_or_pipe(envelope.property_type, name) and not is_tapered(envelope, name):
         for fraction in (0.175, 0.825):
@@ -196,12 +201,70 @@ def _line_intersection(a: Point3D, b: Point3D, c: Point3D, d: Point3D) -> Point3
     return Point3D(a.x + t * abx, a.y + t * aby)
 
 
+def _is_column(centerline: tuple[Point3D, Point3D]) -> bool:
+    start, end = centerline
+    return abs(end.y - start.y) > abs(end.x - start.x) * 1.5
+
+
+def _centerlines_parallel(
+    first: tuple[Point3D, Point3D], second: tuple[Point3D, Point3D]
+) -> bool:
+    a, b = first
+    c, d = second
+    abx, aby = b.x - a.x, b.y - a.y
+    cdx, cdy = d.x - c.x, d.y - c.y
+    lengths = hypot(abx, aby) * hypot(cdx, cdy)
+    return lengths <= 1e-12 or abs(abx * cdx + aby * cdy) / lengths >= 0.9999
+
+
+def _apply_column_rafter_join(
+    column: list[Point3D],
+    rafter: list[Point3D],
+    column_end: int,
+    rafter_end: int,
+    rafter_centerline: tuple[Point3D, Point3D],
+) -> bool:
+    """Apply the flange priorities used at a PEB eave joint."""
+    column_lines = ((column[0], column[1]), (column[2], column[3]))
+    rafter_lines = ((rafter[0], rafter[1]), (rafter[2], rafter[3]))
+    top_rafter = max(range(2), key=lambda side: (rafter_lines[side][0].y + rafter_lines[side][1].y) / 2)
+    bottom_rafter = 1 - top_rafter
+
+    far_rafter_x = rafter_centerline[1 - rafter_end].x
+    inner_column = min(
+        range(2),
+        key=lambda side: abs((column_lines[side][0].x + column_lines[side][1].x) / 2 - far_rafter_x),
+    )
+    outer_column = 1 - inner_column
+
+    top_outer = _line_intersection(*rafter_lines[top_rafter], *column_lines[outer_column])
+    top_inner = _line_intersection(*rafter_lines[top_rafter], *column_lines[inner_column])
+    bottom_inner = _line_intersection(*rafter_lines[bottom_rafter], *column_lines[inner_column])
+    if top_outer is None or top_inner is None or bottom_inner is None:
+        return False
+
+    joint = rafter_centerline[rafter_end]
+    column_width = hypot(column[0].x - column[2].x, column[0].y - column[2].y)
+    if max(hypot(point.x - joint.x, point.y - joint.y)
+           for point in (top_outer, top_inner, bottom_inner)) > column_width * 20:
+        return False
+
+    column_indices = (0, 2) if column_end == 0 else (1, 3)
+    rafter_indices = (0, 2) if rafter_end == 0 else (1, 3)
+    column[column_indices[outer_column]] = top_outer
+    column[column_indices[inner_column]] = top_inner
+    rafter[rafter_indices[top_rafter]] = top_outer
+    rafter[rafter_indices[bottom_rafter]] = bottom_inner
+    return True
+
+
 def apply_peb_corner_joins(
     outlines: dict[int, list[Point3D]],
     incidences: dict[int, tuple[int, int]],
     centerlines: dict[int, tuple[Point3D, Point3D]],
-) -> None:
+) -> set[tuple[int, int]]:
     """Join envelope edges at simple, non-parallel PEB frame corners."""
+    open_ends: set[tuple[int, int]] = set()
     by_node: dict[int, list[tuple[int, int]]] = {}
     for beam, nodes in incidences.items():
         by_node.setdefault(nodes[0], []).append((beam, 0))
@@ -211,6 +274,20 @@ def apply_peb_corner_joins(
         if len(connections) != 2:
             continue
         (beam_a, end_a), (beam_b, end_b) = connections
+        if _centerlines_parallel(centerlines[beam_a], centerlines[beam_b]):
+            continue
+        a_is_column = _is_column(centerlines[beam_a])
+        b_is_column = _is_column(centerlines[beam_b])
+        if a_is_column != b_is_column:
+            column_beam, column_end = (beam_a, end_a) if a_is_column else (beam_b, end_b)
+            rafter_beam, rafter_end = (beam_b, end_b) if a_is_column else (beam_a, end_a)
+            if _apply_column_rafter_join(
+                outlines[column_beam], outlines[rafter_beam], column_end, rafter_end,
+                centerlines[rafter_beam],
+            ):
+                open_ends.update(((column_beam, column_end), (rafter_beam, rafter_end)))
+            continue
+
         a, b = outlines[beam_a], outlines[beam_b]
         a_lines = ((a[0], a[1]), (a[2], a[3]))
         b_lines = ((b[0], b[1]), (b[2], b[3]))
@@ -239,8 +316,8 @@ def apply_peb_corner_joins(
         for side in range(2):
             a[a_indices[side]] = joined[side]
             b[b_indices[pairing[side]]] = joined[side]
-
-
+        open_ends.update(((beam_a, end_a), (beam_b, end_b)))
+    return open_ends
 def _move(point: Point3D, vector: Point3D, amount: float) -> Point3D:
     return Point3D(point.x + vector.x * amount, point.y + vector.y * amount, point.z + vector.z * amount)
 
@@ -331,8 +408,9 @@ def export_selected_members(staad: OpenStaad, output: Path, settings: ExportSett
         outlines[beam] = _envelope_points(
             start, end, envelopes[beam], names[beam], fixed, center_x
         )
+    open_ends: set[tuple[int, int]] = set()
     if settings.peb_corner_joins:
-        apply_peb_corner_joins(outlines, incidences, points)
+        open_ends = apply_peb_corner_joins(outlines, incidences, points)
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("w", encoding="ascii", newline="\n") as stream:
         writer = DxfWriter(stream)
@@ -341,7 +419,10 @@ def export_selected_members(staad: OpenStaad, output: Path, settings: ExportSett
             start, end = points[beam]
             envelope, name = envelopes[beam], names[beam]
             writer.line("MEMBER_CENTERLINE", start, end, "DASHED")
-            _write_envelope(writer, outlines[beam], envelope, name)
+            _write_envelope(
+                writer, outlines[beam], envelope, name,
+                (beam, 0) in open_ends, (beam, 1) in open_ends,
+            )
             if settings.write_labels:
                 _write_label(writer, start, end, _label(staad, beam, name, lengths[beam], envelope.property_type),
                              max(envelope.start_half_width, envelope.end_half_width), settings)
