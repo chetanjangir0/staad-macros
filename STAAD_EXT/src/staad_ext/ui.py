@@ -31,6 +31,7 @@ def ask_export_settings(
     path = StringVar(master=window, value=str(default_path))
     plane = StringVar(master=window, value=ViewPlane.XY.value)
     labels = BooleanVar(master=window, value=True)
+    peb_joins = BooleanVar(master=window, value=False)
     scale = DoubleVar(master=window, value=1.0)
     result: list[tuple[Path, ExportSettings]] = []
 
@@ -53,6 +54,7 @@ def ask_export_settings(
                 ViewPlane(plane.get()),
                 labels.get(),
                 float(scale.get()),
+                peb_joins.get(),
             )
             if not target.name:
                 raise ValueError("Choose an output file.")
@@ -86,15 +88,20 @@ def ask_export_settings(
     ttk.Checkbutton(frame, text="Write text labels", variable=labels).grid(
         row=4, column=0, pady=(14, 2), sticky="w"
     )
+    ttk.Checkbutton(
+        frame,
+        text="Use PEB-style corner joins",
+        variable=peb_joins,
+    ).grid(row=5, column=0, pady=(6, 2), sticky="w")
     ttk.Label(frame, text="Text size scale (0.1-10.0)").grid(
-        row=5, column=0, sticky="w"
+        row=6, column=0, sticky="w"
     )
     ttk.Entry(frame, textvariable=scale, width=12).grid(
-        row=6, column=0, sticky="w"
+        row=7, column=0, sticky="w"
     )
 
     actions = ttk.Frame(frame)
-    actions.grid(row=7, column=0, columnspan=2, pady=(18, 0), sticky="e")
+    actions.grid(row=8, column=0, columnspan=2, pady=(18, 0), sticky="e")
     ttk.Button(actions, text="Cancel", command=window.destroy).pack(
         side="left", padx=4
     )

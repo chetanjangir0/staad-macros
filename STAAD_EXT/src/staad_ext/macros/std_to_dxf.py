@@ -147,12 +147,10 @@ def _line(writer: DxfWriter, layer: str, a: Point3D, b: Point3D, kind: str = "CO
     writer.line(layer, a, b, kind)
 
 
-def _write_envelope(writer: DxfWriter, start: Point3D, end: Point3D, envelope: SectionEnvelope,
-                    name: str, fixed_width: float, center_x: float) -> None:
+def _envelope_points(start: Point3D, end: Point3D, envelope: SectionEnvelope,
+                     name: str, fixed_width: float, center_x: float) -> list[Point3D]:
     unit = offset_vector(start, end)
-    layer = "TUBE_PIPE_SECTION" if is_tube_or_pipe(envelope.property_type, name) else "MEMBER_SECTION"
     if is_tapered(envelope, name):
-        layer = "TAPERED_SECTION"
         dx, dy = end.x - start.x, end.y - start.y
         if abs(dy) > abs(dx) * 1.5:
             desired_x = -1 if (start.x + end.x) / 2 < center_x else 1
@@ -167,12 +165,80 @@ def _write_envelope(writer: DxfWriter, start: Point3D, end: Point3D, envelope: S
     else:
         p1, p2 = _move(start, unit, envelope.start_half_width), _move(end, unit, envelope.end_half_width)
         p3, p4 = _move(start, unit, -envelope.start_half_width), _move(end, unit, -envelope.end_half_width)
+    return [p1, p2, p3, p4]
+
+
+def _write_envelope(writer: DxfWriter, outline: list[Point3D], envelope: SectionEnvelope,
+                    name: str) -> None:
+    p1, p2, p3, p4 = outline
+    layer = "TUBE_PIPE_SECTION" if is_tube_or_pipe(envelope.property_type, name) else "MEMBER_SECTION"
+    if is_tapered(envelope, name):
+        layer = "TAPERED_SECTION"
     for a, b in ((p1, p2), (p3, p4), (p1, p3), (p2, p4)):
         _line(writer, layer, a, b)
     if is_tube_or_pipe(envelope.property_type, name) and not is_tapered(envelope, name):
-        for sign in (0.65, -0.65):
-            _line(writer, "TUBE_PIPE_SECTION", _move(start, unit, envelope.start_half_width * sign),
-                  _move(end, unit, envelope.end_half_width * sign), "HIDDEN")
+        for fraction in (0.175, 0.825):
+            hidden_start = Point3D(p1.x + (p3.x - p1.x) * fraction,
+                                   p1.y + (p3.y - p1.y) * fraction)
+            hidden_end = Point3D(p2.x + (p4.x - p2.x) * fraction,
+                                 p2.y + (p4.y - p2.y) * fraction)
+            _line(writer, "TUBE_PIPE_SECTION", hidden_start, hidden_end, "HIDDEN")
+
+
+def _line_intersection(a: Point3D, b: Point3D, c: Point3D, d: Point3D) -> Point3D | None:
+    """Return the intersection of two infinite 2D lines."""
+    abx, aby = b.x - a.x, b.y - a.y
+    cdx, cdy = d.x - c.x, d.y - c.y
+    denominator = abx * cdy - aby * cdx
+    if abs(denominator) < 1e-9:
+        return None
+    t = ((c.x - a.x) * cdy - (c.y - a.y) * cdx) / denominator
+    return Point3D(a.x + t * abx, a.y + t * aby)
+
+
+def apply_peb_corner_joins(
+    outlines: dict[int, list[Point3D]],
+    incidences: dict[int, tuple[int, int]],
+    centerlines: dict[int, tuple[Point3D, Point3D]],
+) -> None:
+    """Join envelope edges at simple, non-parallel PEB frame corners."""
+    by_node: dict[int, list[tuple[int, int]]] = {}
+    for beam, nodes in incidences.items():
+        by_node.setdefault(nodes[0], []).append((beam, 0))
+        by_node.setdefault(nodes[1], []).append((beam, 1))
+
+    for connections in by_node.values():
+        if len(connections) != 2:
+            continue
+        (beam_a, end_a), (beam_b, end_b) = connections
+        a, b = outlines[beam_a], outlines[beam_b]
+        a_lines = ((a[0], a[1]), (a[2], a[3]))
+        b_lines = ((b[0], b[1]), (b[2], b[3]))
+        intersections = [
+            [_line_intersection(*a_line, *b_line) for b_line in b_lines]
+            for a_line in a_lines
+        ]
+        if any(point is None for row in intersections for point in row):
+            continue
+
+        joint = centerlines[beam_a][end_a]
+        direct = sum(hypot(point.x - joint.x, point.y - joint.y)
+                     for point in (intersections[0][0], intersections[1][1]))
+        crossed = sum(hypot(point.x - joint.x, point.y - joint.y)
+                      for point in (intersections[0][1], intersections[1][0]))
+        pairing = (0, 1) if direct <= crossed else (1, 0)
+        joined = [intersections[0][pairing[0]], intersections[1][pairing[1]]]
+
+        widths = [hypot(a[0].x - a[2].x, a[0].y - a[2].y),
+                  hypot(b[0].x - b[2].x, b[0].y - b[2].y)]
+        if max(hypot(point.x - joint.x, point.y - joint.y) for point in joined) > max(widths) * 20:
+            continue
+
+        a_indices = (0, 2) if end_a == 0 else (1, 3)
+        b_indices = (0, 2) if end_b == 0 else (1, 3)
+        for side in range(2):
+            a[a_indices[side]] = joined[side]
+            b[b_indices[pairing[side]]] = joined[side]
 
 
 def _move(point: Point3D, vector: Point3D, amount: float) -> Point3D:
@@ -232,6 +298,7 @@ def export_selected_members(staad: OpenStaad, output: Path, settings: ExportSett
     if not beams:
         return 0
     points: dict[int, tuple[Point3D, Point3D]] = {}
+    incidences: dict[int, tuple[int, int]] = {}
     lengths: dict[int, float] = {}
     envelopes: dict[int, SectionEnvelope] = {}
     names: dict[int, str] = {}
@@ -241,6 +308,7 @@ def export_selected_members(staad: OpenStaad, output: Path, settings: ExportSett
             continue
         raw_start, raw_end = staad.node_coordinates(start_node), staad.node_coordinates(end_node)
         points[beam] = project(raw_start, settings.plane), project(raw_end, settings.plane)
+        incidences[beam] = (start_node, end_node)
         try:
             lengths[beam] = staad.beam_length(beam)
             if lengths[beam] <= 0:
@@ -256,6 +324,15 @@ def export_selected_members(staad: OpenStaad, output: Path, settings: ExportSett
             f"{beams}, but returned no valid start/end node incidences for them."
         )
     center_x = sum((points[b][0].x + points[b][1].x) / 2 for b in valid) / len(valid) if valid else 0.0
+    outlines: dict[int, list[Point3D]] = {}
+    for beam in valid:
+        start, end = points[beam]
+        fixed = _connected_fixed_width(staad, valid, beam, envelopes, names, points)
+        outlines[beam] = _envelope_points(
+            start, end, envelopes[beam], names[beam], fixed, center_x
+        )
+    if settings.peb_corner_joins:
+        apply_peb_corner_joins(outlines, incidences, points)
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("w", encoding="ascii", newline="\n") as stream:
         writer = DxfWriter(stream)
@@ -264,8 +341,7 @@ def export_selected_members(staad: OpenStaad, output: Path, settings: ExportSett
             start, end = points[beam]
             envelope, name = envelopes[beam], names[beam]
             writer.line("MEMBER_CENTERLINE", start, end, "DASHED")
-            fixed = _connected_fixed_width(staad, valid, beam, envelopes, names, points)
-            _write_envelope(writer, start, end, envelope, name, fixed, center_x)
+            _write_envelope(writer, outlines[beam], envelope, name)
             if settings.write_labels:
                 _write_label(writer, start, end, _label(staad, beam, name, lengths[beam], envelope.property_type),
                              max(envelope.start_half_width, envelope.end_half_width), settings)
