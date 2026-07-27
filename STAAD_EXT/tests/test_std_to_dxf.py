@@ -200,3 +200,51 @@ def test_connection_face_uses_inner_flange_when_top_chord_is_extended() -> None:
     assert value.count('8\nCONNECTION_DETAILS') == 1
     assert '10\n0.200000\n20\n4.260000' in value
     assert '11\n0.200000\n21\n3.820000' in value
+
+def test_ridge_connection_face_stays_vertical_with_ridge_column() -> None:
+    stream = StringIO()
+    writer = DxfWriter(stream)
+    writer.header()
+    write_connection_face_lines(
+        writer,
+        {
+            1: [Point3D(0, 3.8), Point3D(5, 4.8), Point3D(0, 4.2), Point3D(5, 5.2)],
+            2: [Point3D(5, 5.2), Point3D(10, 4.2), Point3D(5, 4.8), Point3D(10, 3.8)],
+            3: [Point3D(4.8, 0), Point3D(4.8, 4.76), Point3D(5.2, 0), Point3D(5.2, 4.76)],
+        },
+        {
+            1: (Point3D(0, 4), Point3D(5, 5)),
+            2: (Point3D(5, 5), Point3D(10, 4)),
+            3: (Point3D(5, 0), Point3D(5, 5)),
+        },
+        {(2, 0), (3, 1)},
+    )
+    writer.footer()
+    value = stream.getvalue()
+    assert value.count('8\nCONNECTION_DETAILS') == 1
+    assert '10\n5.000000\n20\n4.800000' in value
+    assert '11\n5.000000\n21\n5.200000' in value
+
+def test_two_beams_at_column_use_both_flange_connection_faces() -> None:
+    stream = StringIO()
+    writer = DxfWriter(stream)
+    writer.header()
+    write_connection_face_lines(
+        writer,
+        {
+            1: [Point3D(-0.2, 0), Point3D(-0.2, 4.3), Point3D(0.2, 0), Point3D(0.2, 4.3)],
+            2: [Point3D(-5, 3.6), Point3D(-0.2, 4.1), Point3D(-5, 3.2), Point3D(-0.2, 3.7)],
+            3: [Point3D(0.2, 4.1), Point3D(5, 3.6), Point3D(0.2, 3.7), Point3D(5, 3.2)],
+        },
+        {
+            1: (Point3D(0, 0), Point3D(0, 4)),
+            2: (Point3D(-5, 3.4), Point3D(0, 4)),
+            3: (Point3D(0, 4), Point3D(5, 3.4)),
+        },
+        {(1, 1), (2, 1), (3, 0)},
+    )
+    writer.footer()
+    value = stream.getvalue()
+    assert value.count('8\nCONNECTION_DETAILS') == 2
+    assert '10\n-0.200000' in value
+    assert '10\n0.200000' in value

@@ -456,7 +456,37 @@ def write_connection_face_lines(
         by_joint.setdefault((round(joint.x, 6), round(joint.y, 6)), []).append((beam, end))
 
     written: set[tuple[tuple[float, float], tuple[float, float]]] = set()
-    for connections in by_joint.values():
+    for joint_key, connections in by_joint.items():
+        joint = Point3D(*joint_key)
+        all_connections: list[tuple[int, int]] = []
+        for beam, centerline in centerlines.items():
+            for end, point in enumerate(centerline):
+                if (round(point.x, 6), round(point.y, 6)) == joint_key:
+                    all_connections.append((beam, end))
+        ridge_rafters = [
+            connection for connection in all_connections
+            if not _is_column(centerlines[connection[0]])
+            and _rafter_rises_to_joint(
+                centerlines[connection[0]], connection[1], joint
+            )
+        ]
+        if len(ridge_rafters) == 2:
+            far_x = [centerlines[beam][1 - end].x for beam, end in ridge_rafters]
+            cap_points: list[tuple[Point3D, Point3D]] = []
+            for beam, end in ridge_rafters:
+                outline = outlines[beam]
+                indices = (0, 2) if end == 0 else (1, 3)
+                cap_points.append((outline[indices[0]], outline[indices[1]]))
+            caps_on_ridge = all(
+                abs(point.x - joint.x) <= 1e-6
+                for cap in cap_points for point in cap
+            )
+            if caps_on_ridge and (far_x[0] - joint.x) * (far_x[1] - joint.x) < 0:
+                first, second = cap_points[0]
+                if hypot(second.x - first.x, second.y - first.y) > 1e-9:
+                    _line(writer, "CONNECTION_DETAILS", first, second)
+                continue
+
         columns = [
             connection for connection in connections
             if _is_column(centerlines[connection[0]])
