@@ -34,7 +34,10 @@ class DxfWriter:
         layers = (("MEMBER_CENTERLINE", 8, "DASHED"), ("MEMBER_SECTION", 3, "CONTINUOUS"),
                   ("TAPERED_SECTION", 1, "CONTINUOUS"), ("TUBE_PIPE_SECTION", 5, "CONTINUOUS"),
                   ("MEMBER_LABELS", 7, "CONTINUOUS"),
-                  ("CONNECTION_DETAILS", 2, "CONTINUOUS"))
+                  ("CONNECTION_DETAILS", 2, "CONTINUOUS"),
+                  ("CONNECTION_PLATES", 1, "CONTINUOUS"),
+                  ("CONNECTION_CLEATS", 3, "CONTINUOUS"),
+                  ("CONNECTION_BOLTS", 4, "CONTINUOUS"))
         self._pairs(0, "TABLE", 2, "LAYER", 70, len(layers))
         for name, color, linetype in layers:
             self._pairs(0, "LAYER", 2, name, 70, 0, 62, color, 6, linetype)
@@ -47,6 +50,7 @@ class DxfWriter:
         self._pairs(0, "LINE", 8, layer, 6, linetype, 10, self.number(start.x), 20,
                     self.number(start.y), 30, self.number(start.z), 11, self.number(end.x),
                     21, self.number(end.y), 31, self.number(end.z))
+
 
     def text(self, layer: str, point: Point3D, height: float, rotation: float,
              value: str, color: int) -> None:

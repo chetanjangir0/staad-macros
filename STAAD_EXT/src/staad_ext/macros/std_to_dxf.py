@@ -449,7 +449,7 @@ def write_connection_face_lines(
     centerlines: dict[int, tuple[Point3D, Point3D]],
     open_ends: set[tuple[int, int]],
 ) -> None:
-    """Draw each physical section-dividing cap once as the connection face."""
+    """Draw each physical section-dividing face with schematic GA bolt holes."""
     by_joint: dict[tuple[float, float], list[tuple[int, int]]] = {}
     for beam, end in open_ends:
         joint = centerlines[beam][end]
@@ -484,7 +484,7 @@ def write_connection_face_lines(
             if caps_on_ridge and (far_x[0] - joint.x) * (far_x[1] - joint.x) < 0:
                 first, second = cap_points[0]
                 if hypot(second.x - first.x, second.y - first.y) > 1e-9:
-                    _line(writer, "CONNECTION_DETAILS", first, second)
+                    _write_connection_detail(writer, first, second)
                 continue
 
         columns = [
@@ -524,7 +524,88 @@ def write_connection_face_lines(
             if key in written:
                 continue
             written.add(key)
-            _line(writer, "CONNECTION_DETAILS", first, second)
+            _write_connection_detail(writer, first, second)
+
+def _detail_point(
+    origin: Point3D,
+    along: Point3D,
+    across: Point3D,
+    along_distance: float,
+    across_distance: float,
+) -> Point3D:
+    return Point3D(
+        origin.x + along.x * along_distance + across.x * across_distance,
+        origin.y + along.y * along_distance + across.y * across_distance,
+        origin.z,
+    )
+
+
+def _write_connection_detail(
+    writer: DxfWriter,
+    first: Point3D,
+    second: Point3D,
+) -> None:
+    """Draw a schematic bolted splice assembly about the true dividing face."""
+    _line(writer, "CONNECTION_DETAILS", first, second)
+    length = hypot(second.x - first.x, second.y - first.y)
+    if length <= 1e-9:
+        return
+
+    along = Point3D((second.x - first.x) / length, (second.y - first.y) / length)
+    across = Point3D(-along.y, along.x)
+    plate_half_width = max(min(length * 0.045, 0.04), 0.012)
+    end_extension = length * 0.06
+    rail_start = _detail_point(first, along, across, -end_extension, 0)
+    rail_end = _detail_point(first, along, across, length + end_extension, 0)
+    for side in (-1.0, 1.0):
+        _line(
+            writer,
+            "CONNECTION_PLATES",
+            _detail_point(rail_start, along, across, 0, side * plate_half_width),
+            _detail_point(rail_end, along, across, 0, side * plate_half_width),
+        )
+
+    cleat_reach = max(length * 0.18, plate_half_width * 3.5)
+    bolt_half_length = max(length * 0.025, 0.01)
+    bolt_half_width = plate_half_width * 1.35
+    for position in (0.14, 0.38, 0.62, 0.86):
+        center_distance = length * position
+        _line(
+            writer,
+            "CONNECTION_CLEATS",
+            _detail_point(first, along, across, center_distance, -cleat_reach),
+            _detail_point(first, along, across, center_distance, cleat_reach),
+        )
+        corners = [
+            _detail_point(first, along, across, center_distance - bolt_half_length, -bolt_half_width),
+            _detail_point(first, along, across, center_distance + bolt_half_length, -bolt_half_width),
+            _detail_point(first, along, across, center_distance + bolt_half_length, bolt_half_width),
+            _detail_point(first, along, across, center_distance - bolt_half_length, bolt_half_width),
+        ]
+        for index in range(4):
+            _line(writer, "CONNECTION_BOLTS", corners[index], corners[(index + 1) % 4])
+        for fraction in (-0.5, 0.0, 0.5):
+            offset = bolt_half_width * fraction
+            _line(
+                writer,
+                "CONNECTION_BOLTS",
+                _detail_point(first, along, across, center_distance - bolt_half_length, offset - bolt_half_length),
+                _detail_point(first, along, across, center_distance + bolt_half_length, offset + bolt_half_length),
+            )
+
+    triangle_depth = length * 0.14
+    triangle_half_width = max(length * 0.22, plate_half_width * 3.5)
+    for end_origin, direction in ((first, -1.0), (second, 1.0)):
+        apex = _detail_point(end_origin, along, across, direction * triangle_depth, 0)
+        for side in (-1.0, 1.0):
+            shoulder = _detail_point(
+                end_origin,
+                along,
+                across,
+                -direction * triangle_depth * 0.35,
+                side * triangle_half_width,
+            )
+            _line(writer, "CONNECTION_CLEATS", apex, shoulder)
 
 def _move(point: Point3D, vector: Point3D, amount: float) -> Point3D:
     return Point3D(point.x + vector.x * amount, point.y + vector.y * amount, point.z + vector.z * amount)

@@ -97,7 +97,7 @@ def ask_export_settings(
     ).grid(row=5, column=0, pady=(6, 2), sticky="w")
     ttk.Checkbutton(
         frame,
-        text="Show connection face lines",
+        text="Show GA connection details",
         variable=connection_faces,
     ).grid(row=6, column=0, pady=(6, 2), sticky="w")
     ttk.Label(frame, text="Text size scale (0.1-10.0)").grid(

@@ -155,6 +155,10 @@ def test_connection_details_follow_section_dividing_face() -> None:
     value = stream.getvalue()
     assert 'CONNECTION_DETAILS' in value
     assert value.count('8\nCONNECTION_DETAILS') == 1
+    assert value.count('8\nCONNECTION_PLATES') == 2
+    assert value.count('8\nCONNECTION_CLEATS') == 8
+    assert value.count('8\nCONNECTION_BOLTS') == 28
+    assert '0\nCIRCLE' not in value
 
 def test_connection_face_ignores_analytical_split_in_continuous_column() -> None:
     stream = StringIO()
