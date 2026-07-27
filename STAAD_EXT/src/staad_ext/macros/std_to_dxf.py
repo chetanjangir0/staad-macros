@@ -324,7 +324,7 @@ def apply_peb_corner_joins(
         by_node.setdefault(nodes[1], []).append((beam, 1))
 
     for connections in by_node.values():
-        if len(connections) not in (2, 3):
+        if len(connections) < 2:
             continue
         joint = centerlines[connections[0][0]][connections[0][1]]
         rafters = [item for item in connections
@@ -339,21 +339,36 @@ def apply_peb_corner_joins(
                     columns[0] if columns else None,
                 ))
                 continue
+        non_columns = [item for item in connections if item not in columns]
+        if len(columns) == 1 and non_columns:
+            column_beam, column_end = columns[0]
+            column_outline = outlines[column_beam]
+            original_column = column_outline.copy()
+            column_indices = (0, 2) if column_end == 0 else (1, 3)
+            candidates: list[list[Point3D]] = []
+            for member_beam, member_end in non_columns:
+                column_outline[:] = original_column
+                if _apply_column_rafter_join(
+                    column_outline, outlines[member_beam], column_end, member_end,
+                    centerlines[member_beam],
+                ):
+                    candidates.append([column_outline[index] for index in column_indices])
+                    open_ends.add((member_beam, member_end))
+            column_outline[:] = original_column
+            if candidates:
+                far = centerlines[column_beam][1 - column_end]
+                for side, index in enumerate(column_indices):
+                    column_outline[index] = max(
+                        (candidate[side] for candidate in candidates),
+                        key=lambda point: hypot(point.x - far.x, point.y - far.y),
+                    )
+                open_ends.add((column_beam, column_end))
+            continue
+
         if len(connections) != 2:
             continue
         (beam_a, end_a), (beam_b, end_b) = connections
         if _centerlines_parallel(centerlines[beam_a], centerlines[beam_b]):
-            continue
-        a_is_column = _is_column(centerlines[beam_a])
-        b_is_column = _is_column(centerlines[beam_b])
-        if a_is_column != b_is_column:
-            column_beam, column_end = (beam_a, end_a) if a_is_column else (beam_b, end_b)
-            rafter_beam, rafter_end = (beam_b, end_b) if a_is_column else (beam_a, end_a)
-            if _apply_column_rafter_join(
-                outlines[column_beam], outlines[rafter_beam], column_end, rafter_end,
-                centerlines[rafter_beam],
-            ):
-                open_ends.update(((column_beam, column_end), (rafter_beam, rafter_end)))
             continue
 
         a, b = outlines[beam_a], outlines[beam_b]

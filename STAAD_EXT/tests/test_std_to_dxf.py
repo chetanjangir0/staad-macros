@@ -103,3 +103,21 @@ def test_peb_ridge_column_stops_at_rafter_bottom_chords() -> None:
     assert round(outlines[3][1].y, 6) == 4.76
     assert round(outlines[3][3].y, 6) == 4.76
     assert open_ends == {(2, 0), (3, 1)}
+
+def test_peb_column_priority_applies_to_multiple_non_ridge_members() -> None:
+    outlines = {
+        1: [Point3D(-0.2, 0), Point3D(-0.2, 4), Point3D(0.2, 0), Point3D(0.2, 4)],
+        2: [Point3D(-0.1, 4.2), Point3D(4.9, 5.2), Point3D(0.1, 3.8), Point3D(5.1, 4.8)],
+        3: [Point3D(0.1, 4.2), Point3D(-4.9, 5.7), Point3D(-0.1, 3.8), Point3D(-5.1, 5.3)],
+    }
+    open_ends = apply_peb_corner_joins(
+        outlines, {1: (1, 2), 2: (2, 3), 3: (2, 4)},
+        {1: (Point3D(0, 0), Point3D(0, 4)),
+         2: (Point3D(0, 4), Point3D(5, 5)),
+         3: (Point3D(0, 4), Point3D(-5, 5.5))},
+    )
+    assert round(outlines[2][0].x, 6) == -0.2
+    assert round(outlines[2][2].x, 6) == 0.2
+    assert round(outlines[3][0].x, 6) == 0.2
+    assert round(outlines[3][2].x, 6) == -0.2
+    assert open_ends == {(1, 1), (2, 0), (3, 0)}
