@@ -443,6 +443,59 @@ def apply_peb_corner_joins(
             b[b_indices[pairing[side]]] = joined[side]
         open_ends.update(((beam_a, end_a), (beam_b, end_b)))
     return open_ends
+def write_connection_face_lines(
+    writer: DxfWriter,
+    outlines: dict[int, list[Point3D]],
+    centerlines: dict[int, tuple[Point3D, Point3D]],
+    open_ends: set[tuple[int, int]],
+) -> None:
+    """Draw each physical section-dividing cap once as the connection face."""
+    by_joint: dict[tuple[float, float], list[tuple[int, int]]] = {}
+    for beam, end in open_ends:
+        joint = centerlines[beam][end]
+        by_joint.setdefault((round(joint.x, 6), round(joint.y, 6)), []).append((beam, end))
+
+    written: set[tuple[tuple[float, float], tuple[float, float]]] = set()
+    for connections in by_joint.values():
+        columns = [
+            connection for connection in connections
+            if _is_column(centerlines[connection[0]])
+        ]
+        non_columns = [connection for connection in connections if connection not in columns]
+        candidates = non_columns or connections
+        column_lines: list[tuple[Point3D, Point3D]] = []
+        for column_beam, _ in columns:
+            column = outlines[column_beam]
+            column_lines.extend(((column[0], column[1]), (column[2], column[3])))
+
+        for beam, end in candidates:
+            outline = outlines[beam]
+            first_index, second_index = ((0, 2) if end == 0 else (1, 3))
+            first, second = outline[first_index], outline[second_index]
+            if column_lines and not _is_column(centerlines[beam]):
+                far = centerlines[beam][1 - end]
+                receiving_flange = min(
+                    column_lines,
+                    key=lambda line: abs((line[0].x + line[1].x) / 2 - far.x),
+                )
+                member_lines = ((outline[0], outline[1]), (outline[2], outline[3]))
+                intersections = [
+                    _line_intersection(*member_line, *receiving_flange)
+                    for member_line in member_lines
+                ]
+                if intersections[0] is None or intersections[1] is None:
+                    continue
+                first, second = intersections[0], intersections[1]
+            if hypot(second.x - first.x, second.y - first.y) <= 1e-9:
+                continue
+            endpoints = sorted(((round(first.x, 6), round(first.y, 6)),
+                                (round(second.x, 6), round(second.y, 6))))
+            key = (endpoints[0], endpoints[1])
+            if key in written:
+                continue
+            written.add(key)
+            _line(writer, "CONNECTION_DETAILS", first, second)
+
 def _move(point: Point3D, vector: Point3D, amount: float) -> Point3D:
     return Point3D(point.x + vector.x * amount, point.y + vector.y * amount, point.z + vector.z * amount)
 
@@ -534,7 +587,7 @@ def export_selected_members(staad: OpenStaad, output: Path, settings: ExportSett
             start, end, envelopes[beam], names[beam], fixed, center_x
         )
     open_ends: set[tuple[int, int]] = set()
-    if settings.peb_corner_joins:
+    if settings.peb_corner_joins or settings.connection_face_lines:
         open_ends = apply_peb_corner_joins(outlines, incidences, points)
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("w", encoding="ascii", newline="\n") as stream:
@@ -551,5 +604,7 @@ def export_selected_members(staad: OpenStaad, output: Path, settings: ExportSett
             if settings.write_labels:
                 _write_label(writer, start, end, _label(staad, beam, name, lengths[beam], envelope.property_type),
                              max(envelope.start_half_width, envelope.end_half_width), settings)
+        if settings.connection_face_lines:
+            write_connection_face_lines(writer, outlines, points, open_ends)
         writer.footer()
     return len(valid)

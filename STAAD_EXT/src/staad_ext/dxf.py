@@ -33,7 +33,8 @@ class DxfWriter:
         self._pairs(49, "0.25", 49, "-0.20", 0, "ENDTAB")
         layers = (("MEMBER_CENTERLINE", 8, "DASHED"), ("MEMBER_SECTION", 3, "CONTINUOUS"),
                   ("TAPERED_SECTION", 1, "CONTINUOUS"), ("TUBE_PIPE_SECTION", 5, "CONTINUOUS"),
-                  ("MEMBER_LABELS", 7, "CONTINUOUS"))
+                  ("MEMBER_LABELS", 7, "CONTINUOUS"),
+                  ("CONNECTION_DETAILS", 2, "CONTINUOUS"))
         self._pairs(0, "TABLE", 2, "LAYER", 70, len(layers))
         for name, color, linetype in layers:
             self._pairs(0, "LAYER", 2, name, 70, 0, 62, color, 6, linetype)

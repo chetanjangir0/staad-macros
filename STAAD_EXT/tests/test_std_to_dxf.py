@@ -1,7 +1,9 @@
 from io import StringIO
 
 from staad_ext.dxf import DxfWriter
-from staad_ext.macros.std_to_dxf import apply_peb_corner_joins, is_tapered, project
+from staad_ext.macros.std_to_dxf import (
+    apply_peb_corner_joins, is_tapered, project, write_connection_face_lines,
+)
 from staad_ext.models import Point3D, SectionEnvelope, ViewPlane
 
 
@@ -137,3 +139,64 @@ def test_peb_horizontal_beam_stops_at_continuous_column_flange() -> None:
     assert outlines[3][0] == Point3D(0.2, 2.1)
     assert outlines[3][2] == Point3D(0.2, 1.9)
     assert open_ends == {(1, 1), (2, 0), (3, 0)}
+
+def test_connection_details_follow_section_dividing_face() -> None:
+    stream = StringIO()
+    writer = DxfWriter(stream)
+    writer.header()
+    write_connection_face_lines(
+        writer,
+        {1: [Point3D(0, 0.2), Point3D(5, 0.2),
+             Point3D(0, -0.2), Point3D(5, -0.2)]},
+        {1: (Point3D(0, 0), Point3D(5, 0))},
+        {(1, 0)},
+    )
+    writer.footer()
+    value = stream.getvalue()
+    assert 'CONNECTION_DETAILS' in value
+    assert value.count('8\nCONNECTION_DETAILS') == 1
+
+def test_connection_face_ignores_analytical_split_in_continuous_column() -> None:
+    stream = StringIO()
+    writer = DxfWriter(stream)
+    writer.header()
+    write_connection_face_lines(
+        writer,
+        {
+            1: [Point3D(-0.2, 0), Point3D(-0.2, 2), Point3D(0.2, 0), Point3D(0.2, 2)],
+            2: [Point3D(-0.2, 2), Point3D(-0.2, 4), Point3D(0.2, 2), Point3D(0.2, 4)],
+            3: [Point3D(0.2, 2.1), Point3D(5, 2.1), Point3D(0.2, 1.9), Point3D(5, 1.9)],
+        },
+        {
+            1: (Point3D(0, 0), Point3D(0, 2)),
+            2: (Point3D(0, 2), Point3D(0, 4)),
+            3: (Point3D(0, 2), Point3D(5, 2)),
+        },
+        {(1, 1), (2, 0), (3, 0)},
+    )
+    writer.footer()
+    value = stream.getvalue()
+    assert value.count('8\nCONNECTION_DETAILS') == 1
+    assert '10\n0.200000\n20\n2.100000' in value
+
+def test_connection_face_uses_inner_flange_when_top_chord_is_extended() -> None:
+    outlines = {
+        1: [Point3D(-0.2, 0), Point3D(-0.2, 4.18),
+            Point3D(0.2, 0), Point3D(0.2, 4.26)],
+        2: [Point3D(-0.2, 4.18), Point3D(4.9, 5.2),
+            Point3D(0.2, 3.82), Point3D(5.1, 4.8)],
+    }
+    stream = StringIO()
+    writer = DxfWriter(stream)
+    writer.header()
+    write_connection_face_lines(
+        writer, outlines,
+        {1: (Point3D(0, 0), Point3D(0, 4)),
+         2: (Point3D(0, 4), Point3D(5, 5))},
+        {(1, 1), (2, 0)},
+    )
+    writer.footer()
+    value = stream.getvalue()
+    assert value.count('8\nCONNECTION_DETAILS') == 1
+    assert '10\n0.200000\n20\n4.260000' in value
+    assert '11\n0.200000\n21\n3.820000' in value
