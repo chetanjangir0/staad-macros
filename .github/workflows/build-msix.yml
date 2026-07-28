@@ -1,0 +1,61 @@
+name: Build Microsoft Store MSIX
+
+on:
+  workflow_dispatch:
+    inputs:
+      identity_name:
+        description: Package identity name from Partner Center
+        required: true
+        type: string
+      publisher:
+        description: Publisher ID from Partner Center, for example CN=...
+        required: true
+        type: string
+      version:
+        description: Four-part MSIX version, for example 0.1.0.0
+        required: true
+        default: 0.1.0.0
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build-msix:
+    name: Build Store submission package
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: STAAD_EXT
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: STAAD_EXT/pyproject.toml
+      - name: Install build and test dependencies
+        run: python -m pip install --upgrade pip pyinstaller .[dev]
+      - name: Run tests
+        run: python -m pytest
+      - name: Build executable
+        run: pyinstaller --noconfirm --clean STAAD_EXT.spec
+      - name: Build unsigned Store MSIX
+        shell: pwsh
+        env:
+          MSIX_IDENTITY_NAME: ${{ inputs.identity_name }}
+          MSIX_PUBLISHER: ${{ inputs.publisher }}
+          MSIX_VERSION: ${{ inputs.version }}
+        run: |
+          .\packaging\Build-Msix.ps1 `
+            -IdentityName $env:MSIX_IDENTITY_NAME `
+            -Publisher $env:MSIX_PUBLISHER `
+            -Version $env:MSIX_VERSION
+      - name: Upload Store submission package
+        uses: actions/upload-artifact@v4
+        with:
+          name: STAAD_EXT-store-${{ inputs.version }}
+          path: STAAD_EXT/dist/STAAD_EXT-store.msix
+          if-no-files-found: error
