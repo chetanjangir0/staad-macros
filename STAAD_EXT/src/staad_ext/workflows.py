@@ -3,9 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 from tkinter import Misc, messagebox
 
+from staad_ext.macros.plate_summary import selected_member_plate_summary
 from staad_ext.macros.std_to_dxf import export_selected_members
 from staad_ext.openstaad import OpenStaad, OpenStaadError
-from staad_ext.ui import ask_export_settings
+from staad_ext.ui import ask_export_settings, show_plate_summary
 
 
 def run_std_to_dxf(parent: Misc | None = None) -> bool:
@@ -45,3 +46,23 @@ def run_std_to_dxf(parent: Misc | None = None) -> bool:
     except (OpenStaadError, OSError, TypeError, ValueError) as exc:
         messagebox.showerror("STAAD_EXT", str(exc), parent=parent)
     return False
+
+
+def run_plate_summary(parent: Misc | None = None) -> bool:
+    """Show the plate/whole-section schedule for selected beam members."""
+    try:
+        staad = OpenStaad.connect()
+        selected_count = len(staad.selected_beams())
+        if selected_count == 0:
+            messagebox.showwarning(
+                "STAAD_EXT",
+                "Select one or more analytical beam members in STAAD.Pro and retry.",
+                parent=parent,
+            )
+            return False
+        rows = selected_member_plate_summary(staad)
+        show_plate_summary(rows, selected_count, parent=parent)
+        return True
+    except (OpenStaadError, OSError, TypeError, ValueError) as exc:
+        messagebox.showerror("STAAD_EXT", str(exc), parent=parent)
+        return False

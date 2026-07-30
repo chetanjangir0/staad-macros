@@ -14,6 +14,7 @@ from tkinter import (
 )
 
 from staad_ext.models import ExportSettings, ViewPlane
+from staad_ext.macros.plate_summary import PlateSummaryRow
 
 
 def ask_export_settings(
@@ -120,3 +121,61 @@ def ask_export_settings(
     else:
         window.wait_window()
     return result[0] if result else None
+
+
+def show_plate_summary(rows: list[PlateSummaryRow], selected_count: int,
+                       parent: Misc | None = None) -> None:
+    """Show the selected-member plate summary in a scrollable table."""
+    window = Toplevel(parent) if parent is not None else Tk()
+    window.title("Selected Member Plate Summary")
+    window.geometry("1180x600")
+    window.minsize(900, 440)
+    if parent is not None:
+        window.transient(parent)
+    frame = ttk.Frame(window, padding=18)
+    frame.pack(fill="both", expand=True)
+    ttk.Label(frame, text="Selected Member Plate Summary",
+              font=("Segoe UI", 18, "bold")).pack(anchor="w")
+    plate_count = sum(1 for row in rows if row.category != "Whole section")
+    ttk.Label(frame, text=(f"{selected_count} selected member(s) • "
+                           f"{len(rows)} summary row(s) • "
+                           f"{plate_count} fabricated plate row(s)"),
+              foreground="#555555").pack(anchor="w", pady=(2, 14))
+    table_frame = ttk.Frame(frame)
+    table_frame.pack(fill="both", expand=True)
+    columns = ("category", "description", "size", "members", "quantity",
+               "each_length", "total_length", "area", "weight")
+    headings = ("Item", "Description", "Section / plate size", "Members", "Qty",
+                "Each length (m)", "Total length (m)", "Plate area (m²)",
+                "Weight (kg)")
+    widths = (105, 125, 210, 120, 55, 105, 110, 105, 100)
+    numeric = {"quantity", "each_length", "total_length", "area", "weight"}
+    table = ttk.Treeview(table_frame, columns=columns, show="headings")
+    for column, heading, width in zip(columns, headings, widths):
+        table.heading(column, text=heading)
+        table.column(column, width=width, minwidth=50,
+                     anchor="e" if column in numeric else "w")
+    table.tag_configure("plate", background="#eef6ff")
+    for row in rows:
+        table.insert("", "end", values=(
+            row.category, row.description, row.size,
+            ", ".join(str(member) for member in row.members), row.quantity,
+            f"{row.length_each_m:.3f}", f"{row.total_length_m:.3f}",
+            f"{row.plate_area_m2:.3f}" if row.plate_area_m2 is not None else "—",
+            f"{row.weight_kg:.1f}" if row.weight_kg is not None else "—",
+        ), tags=("" if row.category == "Whole section" else "plate",))
+    vertical = ttk.Scrollbar(table_frame, orient="vertical", command=table.yview)
+    horizontal = ttk.Scrollbar(table_frame, orient="horizontal", command=table.xview)
+    table.configure(yscrollcommand=vertical.set, xscrollcommand=horizontal.set)
+    table.grid(row=0, column=0, sticky="nsew")
+    vertical.grid(row=0, column=1, sticky="ns")
+    horizontal.grid(row=1, column=0, sticky="ew")
+    table_frame.rowconfigure(0, weight=1)
+    table_frame.columnconfigure(0, weight=1)
+    total_weight = sum(row.weight_kg or 0.0 for row in rows)
+    ttk.Label(frame, text=f"Estimated steel weight: {total_weight:,.1f} kg",
+              font=("Segoe UI", 10, "bold")).pack(side="left", pady=(12, 0))
+    ttk.Button(frame, text="Close", command=window.destroy).pack(
+        side="right", pady=(12, 0))
+    if parent is None:
+        window.mainloop()

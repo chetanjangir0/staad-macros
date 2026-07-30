@@ -18,6 +18,12 @@ Open the STAAD_EXT main screen with:
 staad-ext
 ```
 
+Choose **Plate Summary** to show a table for the selected analytical members.
+Tapered I-sections are split into a tapered web, top flange, and bottom flange;
+all other section types are kept as whole-section items. The direct command is
+`staad-ext plate-summary`.
+
+
 Choose **STD to DXF**, then select one or more analytical beam members in an
 open STAAD model before exporting. The direct command remains available for
 development and automation: `staad-ext std-to-dxf`.

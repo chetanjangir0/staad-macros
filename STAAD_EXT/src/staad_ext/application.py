@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from tkinter import Tk, ttk
 from typing import Callable
 
-from staad_ext.workflows import run_std_to_dxf
+from staad_ext.workflows import run_plate_summary, run_std_to_dxf
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,6 +24,14 @@ UTILITIES = (
             "labels to an AutoCAD R12 DXF file."
         ),
         action=run_std_to_dxf,
+    ),
+    UtilityDefinition(
+        name="Plate Summary",
+        description=(
+            "Summarize selected tapered I-members as web and flange plates, "
+            "and list every other member as a complete section."
+        ),
+        action=run_plate_summary,
     ),
 )
 
