@@ -7,6 +7,12 @@ from tkinter import filedialog, ttk
 from typing import Callable
 
 from staad_ext.macros.plate_summary import PlateSummaryRow, selected_member_plate_summary
+from staad_ext.macros.support_reactions import (
+    SupportReaction,
+    get_support_reactions,
+    parse_load_cases,
+    reaction_envelopes,
+)
 from staad_ext.macros.std_to_dxf import export_selected_members
 from staad_ext.models import ExportSettings, ViewPlane
 from staad_ext.openstaad import OpenStaad, OpenStaadError
@@ -35,6 +41,13 @@ UTILITY_VIEWS = (
         "Plate Summary",
         "Create a fabrication summary from the members selected in STAAD.Pro.",
         "_build_plate_summary_view",
+    ),
+    UtilityView(
+        "support_reactions",
+        "Support Reactions",
+        "Support Reactions",
+        "Review detailed support reactions and min/max envelopes for chosen load combinations.",
+        "_build_support_reactions_view",
     ),
 )
 
@@ -332,7 +345,7 @@ class StaadExtApplication:
             card.grid(row=0, column=column, sticky="nsew", padx=(0 if column == 0 else 9,
                                                                 9 if column == 0 else 0))
             tk.Label(
-                card, text=f"0{column + 2}", bg=self.PANEL, fg=self.ACCENT,
+                card, text=f"{column + 1:02d}", bg=self.PANEL, fg=self.ACCENT,
                 font=("Consolas", 10, "bold"),
             ).pack(anchor="w")
             tk.Label(
@@ -575,6 +588,99 @@ class StaadExtApplication:
                 ),
                 tags=("plate",) if row.category != "Whole section" else (),
             )
+
+    def _build_support_reactions_view(self, utility: UtilityView) -> None:
+        self._page_header(utility.title, utility.description)
+        controls = self._panel(self.content, 16)
+        controls.pack(fill="x", pady=(0, 14))
+        controls.grid_columnconfigure(0, weight=1)
+        self.reaction_load_cases = tk.StringVar()
+        tk.Label(controls, text="LOAD COMBINATION NUMBERS", bg=self.PANEL,
+                 fg=self.MUTED, font=("Segoe UI", 8, "bold")).grid(
+            row=0, column=0, sticky="w")
+        self._dark_entry(controls, self.reaction_load_cases).grid(
+            row=1, column=0, sticky="ew", pady=(7, 0))
+        self._primary_button(controls, "Get reactions",
+                             self._load_support_reactions).grid(
+            row=1, column=1, padx=(12, 0), pady=(7, 0))
+        tk.Label(
+            controls,
+            text="Examples: 101, 102, 105 or 101-105. Results use global axes.",
+            bg=self.PANEL, fg=self.MUTED, font=("Segoe UI", 8),
+        ).grid(row=2, column=0, sticky="w", pady=(7, 0))
+
+        results = tk.PanedWindow(self.content, orient="vertical", bg=self.BG,
+                                 sashwidth=7, sashrelief="flat", bd=0)
+        results.pack(fill="both", expand=True)
+        detail_panel = self._panel(results, 0)
+        envelope_panel = self._panel(results, 0)
+        results.add(detail_panel, minsize=180, stretch="always")
+        results.add(envelope_panel, minsize=150, stretch="always")
+        self.reaction_table = self._reaction_tree(
+            detail_panel, "DETAILED REACTIONS",
+            ("node", "case", "fx", "fy", "fz", "mx", "my", "mz"),
+            ("Node", "Load combination", "FX", "FY", "FZ", "MX", "MY", "MZ"),
+        )
+        self.reaction_envelope_table = self._reaction_tree(
+            envelope_panel, "MIN / MAX SUMMARY",
+            ("component", "minimum", "min_node", "min_case",
+             "maximum", "max_node", "max_case"),
+            ("Component", "Minimum", "Node", "Load combination",
+             "Maximum", "Node", "Load combination"),
+        )
+
+    def _reaction_tree(self, parent: tk.Frame, title: str,
+                       columns: tuple[str, ...], headings: tuple[str, ...]
+                       ) -> ttk.Treeview:
+        parent.grid_rowconfigure(1, weight=1)
+        parent.grid_columnconfigure(0, weight=1)
+        tk.Label(parent, text=title, bg=self.PANEL, fg=self.MUTED,
+                 font=("Segoe UI", 8, "bold"), padx=12, pady=8).grid(
+            row=0, column=0, sticky="w")
+        table = ttk.Treeview(parent, columns=columns, show="headings",
+                             style="Dark.Treeview")
+        for column, heading in zip(columns, headings):
+            table.heading(column, text=heading)
+            table.column(column, width=120, minwidth=55,
+                         anchor="w" if column == "component" else "e")
+        vertical = ttk.Scrollbar(parent, orient="vertical", command=table.yview,
+                                 style="Dark.Vertical.TScrollbar")
+        horizontal = ttk.Scrollbar(parent, orient="horizontal", command=table.xview,
+                                   style="Dark.Horizontal.TScrollbar")
+        table.configure(yscrollcommand=vertical.set, xscrollcommand=horizontal.set)
+        table.grid(row=1, column=0, sticky="nsew")
+        vertical.grid(row=1, column=1, sticky="ns")
+        horizontal.grid(row=2, column=0, sticky="ew")
+        return table
+
+    def _load_support_reactions(self) -> None:
+        self._set_status("Reading support reactions from STAAD.Pro…", "muted")
+        self.root.update_idletasks()
+        try:
+            load_cases = parse_load_cases(self.reaction_load_cases.get())
+            rows = get_support_reactions(OpenStaad.connect(), load_cases)
+            self._render_support_reactions(rows)
+            node_count = len({row.node for row in rows})
+            self._set_status(
+                f"Loaded {len(rows):,} reactions for {node_count} support(s) "
+                f"and {len(load_cases)} load combination(s).", "success")
+        except (OpenStaadError, OSError, TypeError, ValueError) as exc:
+            self._set_status(str(exc), "error")
+
+    def _render_support_reactions(self, rows: list[SupportReaction]) -> None:
+        self.reaction_table.delete(*self.reaction_table.get_children())
+        self.reaction_envelope_table.delete(
+            *self.reaction_envelope_table.get_children())
+        for row in rows:
+            self.reaction_table.insert(
+                "", "end", values=(row.node, row.load_case, *(
+                    f"{value:,.3f}" for value in row.values)))
+        for row in reaction_envelopes(rows):
+            self.reaction_envelope_table.insert(
+                "", "end", values=(
+                    row.component, f"{row.minimum:,.3f}", row.minimum_node,
+                    row.minimum_load_case, f"{row.maximum:,.3f}",
+                    row.maximum_node, row.maximum_load_case))
 
     def _set_status(self, message: str, kind: str = "muted") -> None:
         colors = {

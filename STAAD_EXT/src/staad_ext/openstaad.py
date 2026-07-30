@@ -27,6 +27,9 @@ class OpenStaad:
         self._application = application
         self.geometry = application.Geometry
         self.property = application.Property
+        self.support = application.Support
+        self.output = application.Output
+        self.load = application.Load
         _flag_methods(application, ("GetSTAADFile",))
         _flag_methods(
             self.geometry,
@@ -37,6 +40,14 @@ class OpenStaad:
             self.property,
             ("GetBeamSectionDisplayName", "GetBeamSectionName",
              "GetBeamPropertyAll", "GetBeamSectionPropertyValuesEx"),
+        )
+        _flag_methods(self.support, ("GetSupportCount", "GetSupportNodes"))
+        _flag_methods(
+            self.output, ("AreResultsAvailable", "GetSupportReactions")
+        )
+        _flag_methods(
+            self.load,
+            ("GetLoadCombinationCaseCount", "GetLoadCombinationCaseNumbers"),
         )
 
     @classmethod
@@ -158,3 +169,51 @@ class OpenStaad:
             beam_no, byref(property_type), byref(values)
         )
         return int(property_type.value), [float(value) for value in values.unpack()]
+
+    def support_nodes(self) -> list[int]:
+        """Return every supported node in the current model."""
+        from comtypes.safearray import _midlSAFEARRAY
+
+        count = int(self.support.GetSupportCount())
+        if count <= 0:
+            return []
+        numbers = _midlSAFEARRAY(c_long).create([0] * count)
+        result = self.support.GetSupportNodes(byref(numbers))
+        if int(result) < 0:
+            raise OpenStaadError("STAAD.Pro could not read the support nodes.")
+        return sorted(int(number) for number in numbers.unpack())
+
+    def load_combination_cases(self) -> list[int]:
+        """Return all load-combination IDs defined in the current model."""
+        from comtypes.safearray import _midlSAFEARRAY
+        count = int(self.load.GetLoadCombinationCaseCount())
+        if count <= 0:
+            return []
+        cases = _midlSAFEARRAY(c_long).create([0] * count)
+        result = self.load.GetLoadCombinationCaseNumbers(byref(cases))
+        if int(result) < 0:
+            raise OpenStaadError(
+                "STAAD.Pro could not read the load combination numbers."
+            )
+        return sorted(int(case) for case in cases.unpack())
+
+    def results_available(self) -> bool:
+        return bool(self.output.AreResultsAvailable())
+
+    def support_reactions(
+        self, node_no: int, load_case: int
+    ) -> tuple[float, float, float, float, float, float]:
+        """Return global FX, FY, FZ, MX, MY and MZ for a support node."""
+        from comtypes.safearray import _midlSAFEARRAY
+
+        values = _midlSAFEARRAY(c_double).create([0.0] * 6)
+        succeeded = self.output.GetSupportReactions(
+            node_no, load_case, byref(values)
+        )
+        if not bool(succeeded):
+            raise OpenStaadError(
+                f"STAAD.Pro has no support reaction result for node {node_no}, "
+                f"load case {load_case}."
+            )
+        unpacked = tuple(float(value) for value in values.unpack())
+        return unpacked  # type: ignore[return-value]
