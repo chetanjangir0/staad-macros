@@ -36,25 +36,52 @@ jobs:
       - name: Build executable
         run: pyinstaller --noconfirm --clean STAAD_EXT.spec
 
-      - name: Package executable and create checksum
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Install WiX Toolset
+        run: dotnet tool install --global wix --version "5.*"
+
+      - name: Build MSI installer
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if ($env:RELEASE_TAG -notmatch '^v(\d+)\.(\d+)\.(\d+)$') {
+            throw "Release tags must use vMAJOR.MINOR.PATCH, for example v0.2.0."
+          }
+          $version = "$($Matches[1]).$($Matches[2]).$($Matches[3])"
+          wix build `
+            -arch x64 `
+            -define "Version=$version" `
+            -bindpath "dist\STAAD_EXT" `
+            -pdbtype none `
+            -out "dist\STAAD_EXT-windows-x64.msi" `
+            "packaging\STAAD_EXT.wxs"
+
+      - name: Package executable and create checksums
         shell: pwsh
         run: |
           Compress-Archive `
             -Path "dist\STAAD_EXT\*" `
             -DestinationPath "dist\STAAD_EXT-windows-x64.zip"
-          (Get-FileHash `
-            "dist\STAAD_EXT-windows-x64.zip" `
-            -Algorithm SHA256).Hash.ToLower() +
-            "  STAAD_EXT-windows-x64.zip" |
-            Set-Content `
-              "dist\STAAD_EXT-windows-x64.zip.sha256" `
-              -Encoding ascii
-
+          foreach ($artifact in @(
+            "STAAD_EXT-windows-x64.zip",
+            "STAAD_EXT-windows-x64.msi"
+          )) {
+            (Get-FileHash "dist\$artifact" -Algorithm SHA256).Hash.ToLower() +
+              "  $artifact" |
+              Set-Content "dist\$artifact.sha256" -Encoding ascii
+          }
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             STAAD_EXT/dist/STAAD_EXT-windows-x64.zip
             STAAD_EXT/dist/STAAD_EXT-windows-x64.zip.sha256
+            STAAD_EXT/dist/STAAD_EXT-windows-x64.msi
+            STAAD_EXT/dist/STAAD_EXT-windows-x64.msi.sha256
           generate_release_notes: true
           fail_on_unmatched_files: true

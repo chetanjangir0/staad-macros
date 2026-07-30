@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+    Name="STAAD_EXT"
+    Manufacturer="SG Green Buildings Private Limited"
+    Version="$(Version)"
+    UpgradeCode="{3E523C81-58EB-4ECA-814A-E07C65FEF011}"
+    Scope="perMachine">
+    <MajorUpgrade
+      DowngradeErrorMessage="A newer version of STAAD_EXT is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="INSTALLFOLDER" Name="STAAD_EXT" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+
+    <File
+      Id="MainExecutable"
+      Source="STAAD_EXT.exe"
+      Directory="INSTALLFOLDER">
+      <Shortcut
+        Id="StartMenuShortcut"
+        Name="STAAD_EXT"
+        Description="STAAD.Pro engineering utilities"
+        Directory="ProgramMenuFolder"
+        WorkingDirectory="INSTALLFOLDER" />
+    </File>
+
+    <Files Include="**" Directory="INSTALLFOLDER">
+      <Exclude Files="STAAD_EXT.exe" />
+    </Files>
+  </Package>
+</Wix>
