@@ -1,12 +1,7 @@
 from __future__ import annotations
 
 from io import TextIOBase
-from math import cos, pi, sin
-
 from staad_ext.models import Point3D
-
-LABEL_WIDTH_FACTOR = 0.7
-LABEL_PART_GAP_FACTOR = 0.2
 
 
 class DxfWriter:
@@ -71,29 +66,7 @@ class DxfWriter:
 
     def _colored_label_line(self, layer: str, point: Point3D, height: float,
                             rotation: float, value: str) -> None:
-        if "; (" in value:
-            pos = value.index("; (") + 1
-            self._text_part(layer, point, height, rotation, value, value[:pos], 0, 32)
-            self._text_part(layer, point, height, rotation, value, value[pos:], pos, 9)
-        elif " (" in value:
-            pos = value.rindex(" (")
-            self._text_part(layer, point, height, rotation, value, value[:pos], 0, 32)
-            self._text_part(layer, point, height, rotation, value, value[pos:], pos, 9)
-        else:
-            color = 32 if value.startswith("2F") else 9 if value.startswith("(") else 32
-            self._text_part(layer, point, height, rotation, value, value, 0, color)
-
-    def _text_part(self, layer: str, point: Point3D, height: float, rotation: float,
-                   full: str, part: str, start: int, color: int) -> None:
-        if not part:
-            return
-        offset_chars = start + len(part) / 2 - len(full) / 2
-        distance = offset_chars * height * LABEL_WIDTH_FACTOR
-        if len(part) < len(full):
-            distance += (-1 if start == 0 else 1) * height * LABEL_PART_GAP_FACTOR / 2
-        angle = rotation * pi / 180
-        location = Point3D(point.x + cos(angle) * distance, point.y + sin(angle) * distance, point.z)
-        self.text(layer, location, height, rotation, part, color)
+        self.text(layer, point, height, rotation, value, 7)
 
     def footer(self) -> None:
         self._pairs(0, "ENDSEC", 0, "EOF")
