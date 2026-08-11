@@ -88,7 +88,8 @@ def test_generate_std_file_content():
         design_code="IS 800:2007",
     )
     std_text = generate_std_file_content(params)
-    assert "STAAD SPACE" in std_text
+    assert "STAAD PLANE" in std_text
+    assert "*** Roof Dead Load Calculation:" in std_text
     assert "JOINT COORDINATES" in std_text
     assert "MEMBER INCIDENCES" in std_text
     assert "LOAD 1 TITLE DEAD LOAD" in std_text
