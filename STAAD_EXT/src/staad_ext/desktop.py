@@ -339,13 +339,12 @@ class StaadExtApplication:
         hero = self._panel(self.content, 25)
         hero.pack(fill="x", pady=(0, 18))
         tk.Label(
-            hero, text="STAAD.Pro utilities, kept together.", bg=self.PANEL,
+            hero, text="STAAD.Pro utilities, Made by Chetan Jangir out of the goodness of his heart.", bg=self.PANEL,
             fg=self.TEXT, font=("Segoe UI", 17, "bold"),
         ).pack(anchor="w")
         tk.Label(
             hero,
-            text=("Select analytical members in your open model, choose a utility "
-                  "from the sidebar, and review the result without leaving this window."),
+            text="(Bro deserves a nice promotion and a hefty salary)",
             bg=self.PANEL, fg=self.MUTED, font=("Segoe UI", 10),
             wraplength=760, justify="left",
         ).pack(anchor="w", pady=(8, 0))
