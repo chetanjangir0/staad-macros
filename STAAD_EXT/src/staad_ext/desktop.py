@@ -12,6 +12,20 @@ from staad_ext.macros.frame_generator import (
     compute_frame_geometry,
     generate_std_file_content,
 )
+from staad_ext.macros.load_combinations import (
+    LOAD_CATEGORIES,
+    CombinationPreset,
+    ComboRule,
+    GeneratedCombo,
+    PrimaryLoadCase,
+    delete_custom_preset,
+    fetch_primary_cases_from_openstaad,
+    format_staad_combo_text,
+    generate_combinations,
+    load_all_presets,
+    push_combos_to_openstaad,
+    save_custom_preset,
+)
 from staad_ext.macros.plate_summary import PlateSummaryRow, selected_member_plate_summary
 from staad_ext.macros.support_reactions import (
     SupportReaction,
@@ -40,6 +54,13 @@ UTILITY_VIEWS = (
         "2D Frame Gen",
         "Generate 2D portal and gabled frame STAAD models with live canvas geometry preview.",
         "_build_frame_generator_view",
+    ),
+    UtilityView(
+        "load_combinations",
+        "Load Combinations",
+        "Load Combos",
+        "Auto-generate load combinations with preset creation, custom rules, and aggregate/separate options.",
+        "_build_load_combinations_view",
     ),
     UtilityView(
         "std_to_dxf",
@@ -1049,6 +1070,405 @@ class StaadExtApplication:
                 self._set_status(f"Saved STAAD file to {selected}", "success")
         except (OSError, TypeError, ValueError) as exc:
             self._set_status(str(exc), "error")
+
+    def _build_load_combinations_view(self, utility: UtilityView) -> None:
+        self._page_header(utility.title, utility.description)
+
+        toolbar = tk.Frame(self.content, bg=self.BG)
+        toolbar.pack(fill="x", pady=(0, 14))
+
+        self._primary_button(toolbar, "Fetch Load Cases from STAAD", self._fetch_lc_from_staad).pack(side="left")
+        self._secondary_button(toolbar, "+ Add Primary Case Row", self._add_manual_lc_row).pack(side="left", padx=(10, 0))
+
+        controls_panel = self._panel(self.content, 14)
+        controls_panel.pack(fill="x", pady=(0, 14))
+        controls_panel.grid_columnconfigure(1, weight=1)
+
+        tk.Label(controls_panel, text="PRESET:", bg=self.PANEL, fg=self.MUTED, font=("Segoe UI", 8, "bold")).grid(
+            row=0, column=0, sticky="w"
+        )
+
+        self.lc_preset_name = tk.StringVar()
+        self.lc_presets_list = load_all_presets()
+        preset_names = [p.name for p in self.lc_presets_list]
+        self.lc_preset_combo = ttk.Combobox(
+            controls_panel, textvariable=self.lc_preset_name, values=preset_names, state="readonly", width=32
+        )
+        if preset_names:
+            self.lc_preset_name.set(preset_names[0])
+        self.lc_preset_combo.grid(row=0, column=1, sticky="w", padx=(10, 10))
+        self.lc_preset_combo.bind("<<ComboboxSelected>>", lambda _e: self._on_preset_changed())
+
+        preset_btn_frame = tk.Frame(controls_panel, bg=self.PANEL)
+        preset_btn_frame.grid(row=0, column=2, sticky="e")
+        self._secondary_button(preset_btn_frame, "Edit / Create Factor Preset...", self._show_edit_preset_factors_dialog).pack(side="left", padx=(0, 6))
+        self._secondary_button(preset_btn_frame, "Delete Custom Preset", self._delete_current_preset).pack(side="left")
+
+        opt_frame = tk.Frame(controls_panel, bg=self.PANEL)
+        opt_frame.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(10, 0))
+
+        self.lc_aggregate_var = tk.BooleanVar(value=False)
+        self._dark_check(
+            opt_frame, "Aggregate load cases of same category (e.g. DL1 + DL2 together)", self.lc_aggregate_var
+        ).pack(side="left", padx=(0, 25))
+        self.lc_aggregate_var.trace_add("write", lambda *_: self._recalculate_combinations())
+
+        tk.Label(opt_frame, text="Start ULS #:", bg=self.PANEL, fg=self.MUTED, font=("Segoe UI", 9)).pack(side="left")
+        self.lc_start_uls = tk.StringVar(value="101")
+        e_uls = self._dark_entry(opt_frame, self.lc_start_uls, width=6)
+        e_uls.pack(side="left", padx=(5, 15))
+        e_uls.bind("<KeyRelease>", lambda _e: self._recalculate_combinations())
+
+        tk.Label(opt_frame, text="Start SLS #:", bg=self.PANEL, fg=self.MUTED, font=("Segoe UI", 9)).pack(side="left")
+        self.lc_start_sls = tk.StringVar(value="201")
+        e_sls = self._dark_entry(opt_frame, self.lc_start_sls, width=6)
+        e_sls.pack(side="left", padx=(5, 0))
+        e_sls.bind("<KeyRelease>", lambda _e: self._recalculate_combinations())
+
+        paned = tk.PanedWindow(self.content, orient="vertical", bg=self.BG, sashwidth=7, sashrelief="flat", bd=0)
+        paned.pack(fill="both", expand=True)
+
+        primary_panel = self._panel(paned, 0)
+        preview_panel = self._panel(paned, 0)
+
+        paned.add(primary_panel, minsize=160, stretch="always")
+        paned.add(preview_panel, minsize=220, stretch="always")
+
+        primary_panel.grid_rowconfigure(1, weight=1)
+        primary_panel.grid_columnconfigure(0, weight=1)
+        tk.Label(
+            primary_panel, text="PRIMARY LOAD CASES MAPPING (Double click a row to change Category)", bg=self.PANEL, fg=self.MUTED,
+            font=("Segoe UI", 8, "bold"), padx=12, pady=8
+        ).grid(row=0, column=0, sticky="w")
+
+        cols_p = ("id", "title", "category")
+        heads_p = ("Load Case #", "Title", "Assigned Category (Double-click to edit)")
+        widths_p = (100, 300, 400)
+        self.lc_primary_table = ttk.Treeview(primary_panel, columns=cols_p, show="headings", style="Dark.Treeview")
+        for col, head, w in zip(cols_p, heads_p, widths_p):
+            self.lc_primary_table.heading(col, text=head)
+            self.lc_primary_table.column(col, width=w, minwidth=60, anchor="center" if col in ("id", "category") else "w")
+
+        v_p = ttk.Scrollbar(primary_panel, orient="vertical", command=self.lc_primary_table.yview, style="Dark.Vertical.TScrollbar")
+        self.lc_primary_table.configure(yscrollcommand=v_p.set)
+        self.lc_primary_table.grid(row=1, column=0, sticky="nsew")
+        v_p.grid(row=1, column=1, sticky="ns")
+
+        self.lc_primary_table.bind("<Double-1>", self._on_edit_primary_category)
+
+        preview_panel.grid_rowconfigure(1, weight=1)
+        preview_panel.grid_columnconfigure(0, weight=1)
+
+        prev_header = tk.Frame(preview_panel, bg=self.PANEL)
+        prev_header.grid(row=0, column=0, sticky="ew", padx=12, pady=8)
+        tk.Label(
+            prev_header, text="GENERATED LOAD COMBINATIONS PREVIEW", bg=self.PANEL, fg=self.MUTED,
+            font=("Segoe UI", 8, "bold")
+        ).pack(side="left")
+        self.lc_combo_count_lbl = tk.Label(
+            prev_header, text="0 combinations", bg=self.PANEL, fg=self.SUCCESS,
+            font=("Segoe UI", 8, "bold")
+        )
+        self.lc_combo_count_lbl.pack(side="right")
+
+        cols_c = ("number", "title", "type", "formula")
+        heads_c = ("Combo #", "Combination Name", "Type", "Constituent Load Cases & Factors")
+        widths_c = (90, 320, 80, 420)
+        self.lc_combo_table = ttk.Treeview(preview_panel, columns=cols_c, show="headings", style="Dark.Treeview")
+        for col, head, w in zip(cols_c, heads_c, widths_c):
+            self.lc_combo_table.heading(col, text=head)
+            self.lc_combo_table.column(col, width=w, minwidth=60, anchor="center" if col in ("number", "type") else "w")
+
+        v_c = ttk.Scrollbar(preview_panel, orient="vertical", command=self.lc_combo_table.yview, style="Dark.Vertical.TScrollbar")
+        self.lc_combo_table.configure(yscrollcommand=v_c.set)
+        self.lc_combo_table.grid(row=1, column=0, sticky="nsew")
+        v_c.grid(row=1, column=1, sticky="ns")
+
+        action_bar = tk.Frame(self.content, bg=self.BG)
+        action_bar.pack(fill="x", pady=(12, 0))
+        self._primary_button(action_bar, "Send Combinations to Active STAAD.Pro", self._push_combos_to_staad).pack(
+            side="left", padx=(0, 10)
+        )
+        self._secondary_button(action_bar, "Copy STAAD Commands", self._copy_staad_combo_commands).pack(
+            side="left"
+        )
+
+        self.primary_cases_data: list[PrimaryLoadCase] = [
+            PrimaryLoadCase(1, "DEAD LOAD", "DL"),
+            PrimaryLoadCase(2, "COLLATERAL LOAD", "DL"),
+            PrimaryLoadCase(3, "LIVE LOAD", "LL"),
+            PrimaryLoadCase(4, "WIND +X", "WL"),
+            PrimaryLoadCase(5, "WIND -X", "WL"),
+        ]
+        self.generated_combos_data: list[GeneratedCombo] = []
+        self._render_primary_cases_table()
+        self._recalculate_combinations()
+
+    def _render_primary_cases_table(self) -> None:
+        self.lc_primary_table.delete(*self.lc_primary_table.get_children())
+        for plc in self.primary_cases_data:
+            self.lc_primary_table.insert("", "end", iid=str(plc.id), values=(plc.id, plc.title, plc.category))
+
+    def _on_edit_primary_category(self, _event: Any) -> None:
+        sel = self.lc_primary_table.selection()
+        if not sel:
+            return
+        lc_id = int(sel[0])
+        plc = next((c for c in self.primary_cases_data if c.id == lc_id), None)
+        if not plc:
+            return
+
+        menu = tk.Menu(self.root, tearoff=0, bg=self.PANEL_ALT, fg=self.TEXT, activebackground=self.ACCENT)
+        for cat in LOAD_CATEGORIES:
+            menu.add_command(
+                label=cat,
+                command=lambda selected_cat=cat: self._set_primary_category(plc, selected_cat),
+            )
+        try:
+            menu.tk_popup(self.root.winfo_pointerx(), self.root.winfo_pointery())
+        finally:
+            menu.grab_release()
+
+    def _set_primary_category(self, plc: PrimaryLoadCase, category: str) -> None:
+        plc.category = category
+        self._render_primary_cases_table()
+        self._recalculate_combinations()
+
+    def _fetch_lc_from_staad(self) -> None:
+        self._set_status("Fetching primary load cases from STAAD.Pro…", "muted")
+        self.root.update_idletasks()
+        try:
+            staad = OpenStaad.connect()
+            cases = fetch_primary_cases_from_openstaad(staad)
+            if not cases:
+                self._set_status("No primary load cases found in active model.", "warning")
+                return
+            self.primary_cases_data = cases
+            self._render_primary_cases_table()
+            self._recalculate_combinations()
+            self._set_status(f"Loaded {len(cases)} primary load case(s) from STAAD.Pro.", "success")
+        except (OpenStaadError, OSError, TypeError, ValueError) as exc:
+            self._set_status(str(exc), "error")
+
+    def _add_manual_lc_row(self) -> None:
+        next_id = max([c.id for c in self.primary_cases_data], default=0) + 1
+        self.primary_cases_data.append(PrimaryLoadCase(next_id, f"LOAD CASE {next_id}", "DL"))
+        self._render_primary_cases_table()
+        self._recalculate_combinations()
+
+    def _on_preset_changed(self) -> None:
+        self._recalculate_combinations()
+
+    def _get_selected_preset(self) -> CombinationPreset:
+        name = self.lc_preset_name.get()
+        return next((p for p in self.lc_presets_list if p.name == name), self.lc_presets_list[0])
+
+    def _recalculate_combinations(self) -> None:
+        if not hasattr(self, "lc_combo_table"):
+            return
+        preset = self._get_selected_preset()
+        try:
+            uls = int(self.lc_start_uls.get().strip() or "101")
+            sls = int(self.lc_start_sls.get().strip() or "201")
+        except ValueError:
+            uls, sls = 101, 201
+
+        combos = generate_combinations(
+            primary_cases=self.primary_cases_data,
+            preset=preset,
+            aggregate_same_type=self.lc_aggregate_var.get(),
+            start_uls=uls,
+            start_sls=sls,
+        )
+        self.generated_combos_data = combos
+        self.lc_combo_table.delete(*self.lc_combo_table.get_children())
+        for c in combos:
+            formula = " + ".join(f"{factor:g}×[LC{lc_id}]" for lc_id, factor in c.factors)
+            self.lc_combo_table.insert("", "end", values=(c.number, c.title, c.combo_type, formula))
+
+        self.lc_combo_count_lbl.configure(text=f"{len(combos)} combinations generated")
+
+    def _show_edit_preset_factors_dialog(self) -> None:
+        win = tk.Toplevel(self.root)
+        win.title("Create / Edit Load Factor Preset")
+        win.geometry("920x560")
+        win.configure(bg=self.PANEL)
+        win.transient(self.root)
+        win.grab_set()
+
+        curr_preset = self._get_selected_preset()
+
+        top_frame = tk.Frame(win, bg=self.PANEL)
+        top_frame.pack(fill="x", padx=16, pady=(16, 10))
+
+        tk.Label(top_frame, text="Preset Name:", bg=self.PANEL, fg=self.TEXT, font=("Segoe UI", 9, "bold")).pack(side="left")
+        name_var = tk.StringVar(value=f"{curr_preset.name} (Copy)" if curr_preset.is_builtin else curr_preset.name)
+        self._dark_entry(top_frame, name_var, width=28).pack(side="left", padx=(8, 20))
+
+        tk.Label(top_frame, text="Description:", bg=self.PANEL, fg=self.MUTED, font=("Segoe UI", 9)).pack(side="left")
+        desc_var = tk.StringVar(value=curr_preset.description)
+        self._dark_entry(top_frame, desc_var, width=32).pack(side="left", padx=(8, 0))
+
+        table_container = tk.Frame(win, bg=self.PANEL_ALT, highlightbackground=self.BORDER, highlightthickness=1)
+        table_container.pack(fill="both", expand=True, padx=16, pady=(0, 10))
+
+        canvas = tk.Canvas(table_container, bg=self.PANEL_ALT, highlightthickness=0, bd=0)
+        vbar = ttk.Scrollbar(table_container, orient="vertical", command=canvas.yview, style="Dark.Vertical.TScrollbar")
+        rules_frame = tk.Frame(canvas, bg=self.PANEL_ALT)
+
+        rules_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        window_id = canvas.create_window((0, 0), window=rules_frame, anchor="nw")
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig(window_id, width=e.width))
+        canvas.configure(yscrollcommand=vbar.set)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        vbar.pack(side="right", fill="y")
+
+        cats = ("DL", "LL", "RLL", "CL", "WL", "EQ", "CRANE", "TEMP")
+        headers = ["Rule Name / Formula", "Type"] + list(cats)
+        widths = [20, 7] + [5] * len(cats)
+
+        hdr_frame = tk.Frame(rules_frame, bg=self.PANEL)
+        hdr_frame.pack(fill="x", padx=4, pady=(4, 6))
+        for col_idx, (h, w) in enumerate(zip(headers, widths)):
+            tk.Label(
+                hdr_frame, text=h, bg=self.PANEL, fg=self.MUTED,
+                font=("Segoe UI", 8, "bold"), width=w, anchor="center" if col_idx > 0 else "w"
+            ).pack(side="left", padx=2)
+
+        rule_rows_data: list[dict[str, Any]] = []
+
+        def add_rule_row(rule: ComboRule | None = None) -> None:
+            r_frame = tk.Frame(rules_frame, bg=self.PANEL_ALT)
+            r_frame.pack(fill="x", padx=4, pady=2)
+
+            name_v = tk.StringVar(value=rule.name_template if rule else "1.5(DL + LL)")
+            type_v = tk.StringVar(value=rule.combo_type if rule else "ULS")
+            factor_vars: dict[str, tk.StringVar] = {}
+
+            e_name = self._dark_entry(r_frame, name_v, width=20)
+            e_name.pack(side="left", padx=2)
+
+            combo_type = ttk.Combobox(r_frame, textvariable=type_v, values=["ULS", "SLS"], state="readonly", width=6)
+            combo_type.pack(side="left", padx=2)
+
+            rule_factors = rule.factors if rule else {}
+            for cat in cats:
+                init_val = str(rule_factors.get(cat, 0.0)) if rule else ("1.5" if cat in ("DL", "LL") else "0")
+                f_var = tk.StringVar(value=init_val)
+                factor_vars[cat] = f_var
+                e_f = self._dark_entry(r_frame, f_var, width=5)
+                e_f.pack(side="left", padx=2)
+
+            del_btn = tk.Button(
+                r_frame, text="✕", bg=self.PANEL_ALT, fg=self.ERROR,
+                activebackground=self.BORDER, activeforeground=self.ERROR,
+                relief="flat", bd=0, font=("Segoe UI", 8, "bold"), cursor="hand2",
+                command=lambda rf=r_frame, rd=rule_rows_data: remove_rule_row(rf, rd)
+            )
+            del_btn.pack(side="left", padx=(4, 0))
+
+            rule_rows_data.append({
+                "frame": r_frame,
+                "name": name_v,
+                "type": type_v,
+                "factors": factor_vars,
+            })
+
+        def remove_rule_row(r_frame: tk.Frame, rd: list[dict[str, Any]]) -> None:
+            r_frame.destroy()
+            rd[:] = [item for item in rd if item["frame"] is r_frame]
+
+        for r in curr_preset.rules:
+            add_rule_row(r)
+
+        btn_toolbar = tk.Frame(win, bg=self.PANEL)
+        btn_toolbar.pack(fill="x", padx=16, pady=(0, 16))
+
+        self._secondary_button(btn_toolbar, "+ Add Factor Rule Row", lambda: add_rule_row()).pack(side="left")
+
+        def save_preset_factors() -> None:
+            pname = name_var.get().strip()
+            if not pname:
+                return
+
+            new_rules: list[ComboRule] = []
+            for row in rule_rows_data:
+                try:
+                    r_name = row["name"].get().strip()
+                    r_type = row["type"].get().strip()
+                    if not r_name:
+                        continue
+                    factors_dict: dict[str, float] = {}
+                    for cat, fvar in row["factors"].items():
+                        try:
+                            val = float(fvar.get().strip())
+                            if abs(val) > 1e-4:
+                                factors_dict[cat] = val
+                        except ValueError:
+                            pass
+                    if factors_dict:
+                        new_rules.append(ComboRule(name_template=r_name, combo_type=r_type, factors=factors_dict))
+                except Exception:
+                    pass
+
+            if not new_rules:
+                return
+
+            new_preset = CombinationPreset(
+                name=pname,
+                description=desc_var.get().strip(),
+                is_builtin=False,
+                rules=new_rules,
+            )
+            save_custom_preset(new_preset)
+
+            self.lc_presets_list = load_all_presets()
+            preset_names = [p.name for p in self.lc_presets_list]
+            self.lc_preset_combo.configure(values=preset_names)
+            self.lc_preset_name.set(pname)
+            win.destroy()
+            self._recalculate_combinations()
+            self._set_status(f"Saved custom factor preset '{pname}' with {len(new_rules)} rules.", "success")
+
+        self._primary_button(btn_toolbar, "Save Factor Preset", save_preset_factors).pack(side="right", padx=(10, 0))
+        self._secondary_button(btn_toolbar, "Cancel", win.destroy).pack(side="right")
+
+    def _delete_current_preset(self) -> None:
+        preset = self._get_selected_preset()
+        if preset.is_builtin:
+            self._set_status("Cannot delete built-in standard presets.", "warning")
+            return
+        if delete_custom_preset(preset.name):
+            self.lc_presets_list = load_all_presets()
+            preset_names = [p.name for p in self.lc_presets_list]
+            self.lc_preset_combo.configure(values=preset_names)
+            if preset_names:
+                self.lc_preset_name.set(preset_names[0])
+            self._recalculate_combinations()
+            self._set_status(f"Deleted custom preset '{preset.name}'.", "success")
+
+    def _push_combos_to_staad(self) -> None:
+        if not self.generated_combos_data:
+            self._set_status("No combinations generated to send.", "warning")
+            return
+        self._set_status("Connecting to STAAD.Pro and creating load combinations…", "muted")
+        self.root.update_idletasks()
+        try:
+            staad = OpenStaad.connect()
+            count = push_combos_to_openstaad(staad, self.generated_combos_data)
+            self._set_status(f"Successfully created {count} load combination(s) in active STAAD.Pro model!", "success")
+        except (OpenStaadError, OSError, TypeError, ValueError) as exc:
+            self._set_status(str(exc), "error")
+
+    def _copy_staad_combo_commands(self) -> None:
+        if not self.generated_combos_data:
+            self._set_status("No combinations generated to copy.", "warning")
+            return
+        text = format_staad_combo_text(self.generated_combos_data)
+        self.root.clipboard_clear()
+        self.root.clipboard_append(text)
+        self._set_status(f"Copied STAAD text for {len(self.generated_combos_data)} combinations to clipboard!", "success")
 
     def _set_status(self, message: str, kind: str = "muted") -> None:
         colors = {
