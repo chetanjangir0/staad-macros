@@ -6,6 +6,12 @@ import tkinter as tk
 from tkinter import filedialog, ttk
 from typing import Callable
 
+from staad_ext.macros.frame_generator import (
+    FrameParameters,
+    build_model_in_openstaad,
+    compute_frame_geometry,
+    generate_std_file_content,
+)
 from staad_ext.macros.plate_summary import PlateSummaryRow, selected_member_plate_summary
 from staad_ext.macros.support_reactions import (
     SupportReaction,
@@ -28,6 +34,13 @@ class UtilityView:
 
 
 UTILITY_VIEWS = (
+    UtilityView(
+        "frame_generator",
+        "2D Frame Generator",
+        "2D Frame Gen",
+        "Generate 2D portal and gabled frame STAAD models with live canvas geometry preview.",
+        "_build_frame_generator_view",
+    ),
     UtilityView(
         "std_to_dxf",
         "STD to DXF",
@@ -681,6 +694,362 @@ class StaadExtApplication:
                     row.component, f"{row.minimum:,.3f}", row.minimum_node,
                     row.minimum_load_case, f"{row.maximum:,.3f}",
                     row.maximum_node, row.maximum_load_case))
+
+    def _build_frame_generator_view(self, utility: UtilityView) -> None:
+        self._page_header(utility.title, utility.description)
+
+        container = tk.Frame(self.content, bg=self.BG)
+        container.pack(fill="both", expand=True)
+        container.grid_columnconfigure(0, weight=4)
+        container.grid_columnconfigure(1, weight=5)
+        container.grid_rowconfigure(0, weight=1)
+
+        left_panel = self._panel(container, 14)
+        left_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+
+        form_canvas = tk.Canvas(left_panel, bg=self.PANEL, highlightthickness=0, bd=0)
+        scrollbar = ttk.Scrollbar(left_panel, orient="vertical", command=form_canvas.yview, style="Dark.Vertical.TScrollbar")
+        form_frame = tk.Frame(form_canvas, bg=self.PANEL)
+
+        form_frame.bind(
+            "<Configure>",
+            lambda e: form_canvas.configure(scrollregion=form_canvas.bbox("all"))
+        )
+        form_window = form_canvas.create_window((0, 0), window=form_frame, anchor="nw")
+        form_canvas.bind("<Configure>", lambda e: form_canvas.itemconfig(form_window, width=e.width))
+        form_canvas.configure(yscrollcommand=scrollbar.set)
+
+        form_canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        self.fg_width = tk.StringVar(value="20.0")
+        self.fg_eave_height = tk.StringVar(value="7.0")
+        self.fg_ridge_distance = tk.StringVar(value="10.0")
+        self.fg_slope = tk.StringVar(value="5.0")
+        self.fg_brick_wall_height = tk.StringVar(value="0.0")
+        self.fg_col_mode = tk.StringVar(value="count")
+        self.fg_col_input = tk.StringVar(value="1")
+        self.fg_mezzanine_enabled = tk.BooleanVar(value=False)
+        self.fg_mezzanine_height = tk.StringVar(value="3.5")
+        self.fg_mezzanine_start_x = tk.StringVar(value="0.0")
+        self.fg_mezzanine_end_x = tk.StringVar(value="10.0")
+        self.fg_bay_spacing = tk.StringVar(value="6.0")
+        self.fg_left_support = tk.StringVar(value="Fixed")
+        self.fg_right_support = tk.StringVar(value="Fixed")
+        self.fg_int_support = tk.StringVar(value="Fixed")
+        self.fg_basic_wind_speed = tk.StringVar(value="39.0")
+        self.fg_seismic_zone = tk.StringVar(value="Zone III (0.16)")
+        self.fg_dead_load = tk.StringVar(value="0.15")
+        self.fg_roof_live_load = tk.StringVar(value="0.75")
+        self.fg_collateral_load = tk.StringVar(value="0.10")
+        self.fg_mezzanine_live_load = tk.StringVar(value="3.0")
+        self.fg_mezzanine_dead_load = tk.StringVar(value="1.5")
+        self.fg_design_code = tk.StringVar(value="IS 800:2007")
+
+        all_vars: list[tk.Variable] = [
+            self.fg_width, self.fg_eave_height, self.fg_ridge_distance, self.fg_slope,
+            self.fg_brick_wall_height, self.fg_col_mode, self.fg_col_input,
+            self.fg_mezzanine_enabled, self.fg_mezzanine_height, self.fg_mezzanine_start_x,
+            self.fg_mezzanine_end_x, self.fg_bay_spacing, self.fg_left_support,
+            self.fg_right_support, self.fg_int_support, self.fg_basic_wind_speed,
+            self.fg_seismic_zone, self.fg_dead_load, self.fg_roof_live_load,
+            self.fg_collateral_load, self.fg_mezzanine_live_load, self.fg_mezzanine_dead_load,
+            self.fg_design_code
+        ]
+        for v in all_vars:
+            v.trace_add("write", lambda *_: self._redraw_frame_canvas())
+
+        row = 0
+        self._section_header(form_frame, "FRAME GEOMETRY", row)
+        row += 1
+        row = self._form_row(form_frame, "Width (m):", self.fg_width, row)
+        row = self._form_row(form_frame, "Eave Height (m):", self.fg_eave_height, row)
+        row = self._form_row(form_frame, "Ridge Distance (m):", self.fg_ridge_distance, row)
+        row = self._form_row(form_frame, "Roof Slope (1:x):", self.fg_slope, row)
+        row = self._form_row(form_frame, "Brick Wall Ht (m):", self.fg_brick_wall_height, row)
+
+        self._section_header(form_frame, "INTERIOR COLUMNS", row)
+        row += 1
+        mode_frame = tk.Frame(form_frame, bg=self.PANEL)
+        mode_frame.grid(row=row, column=0, columnspan=2, sticky="w", pady=(2, 6))
+        self._dark_radio(mode_frame, "By Count", self.fg_col_mode, "count").pack(side="left", padx=(0, 15))
+        self._dark_radio(mode_frame, "By Spacing (e.g. 5, 5)", self.fg_col_mode, "spacing").pack(side="left")
+        row += 1
+        row = self._form_row(form_frame, "Count / Spacing:", self.fg_col_input, row)
+
+        self._section_header(form_frame, "MEZZANINE FLOOR", row)
+        row += 1
+        self._dark_check(form_frame, "Enable Mezzanine Floor", self.fg_mezzanine_enabled).grid(
+            row=row, column=0, columnspan=2, sticky="w", pady=(2, 6)
+        )
+        row += 1
+        row = self._form_row(form_frame, "Mezzanine Height (m):", self.fg_mezzanine_height, row)
+        row = self._form_row(form_frame, "Start X (m):", self.fg_mezzanine_start_x, row)
+        row = self._form_row(form_frame, "End X (m):", self.fg_mezzanine_end_x, row)
+
+        self._section_header(form_frame, "SUPPORTS & BAY SPACING", row)
+        row += 1
+        row = self._form_row(form_frame, "Bay Spacing (m):", self.fg_bay_spacing, row)
+        row = self._form_choice_row(form_frame, "Left Support:", self.fg_left_support, ["Fixed", "Pinned"], row)
+        row = self._form_choice_row(form_frame, "Right Support:", self.fg_right_support, ["Fixed", "Pinned"], row)
+        row = self._form_choice_row(form_frame, "Interior Support:", self.fg_int_support, ["Fixed", "Pinned"], row)
+
+        self._section_header(form_frame, "LOADS & ENVIRONMENT", row)
+        row += 1
+        row = self._form_row(form_frame, "Wind Speed (m/s):", self.fg_basic_wind_speed, row)
+        row = self._form_choice_row(
+            form_frame, "Seismic Zone:", self.fg_seismic_zone,
+            ["Zone II (0.10)", "Zone III (0.16)", "Zone IV (0.24)", "Zone V (0.36)"], row
+        )
+        row = self._form_row(form_frame, "Dead Load (kN/m²):", self.fg_dead_load, row)
+        row = self._form_row(form_frame, "Roof Live Load (kN/m²):", self.fg_roof_live_load, row)
+        row = self._form_row(form_frame, "Collateral Load (kN/m²):", self.fg_collateral_load, row)
+        row = self._form_row(form_frame, "Mezzanine Live (kN/m²):", self.fg_mezzanine_live_load, row)
+        row = self._form_row(form_frame, "Mezzanine Dead (kN/m²):", self.fg_mezzanine_dead_load, row)
+
+        self._section_header(form_frame, "DESIGN CODE", row)
+        row += 1
+        row = self._form_choice_row(
+            form_frame, "Steel Design Code:", self.fg_design_code,
+            ["IS 800:2007", "AISC 360-16 (LRFD)", "AISC 360-16 (ASD)"], row
+        )
+
+        right_panel = self._panel(container, 18)
+        right_panel.grid(row=0, column=1, sticky="nsew")
+        right_panel.grid_rowconfigure(1, weight=1)
+        right_panel.grid_columnconfigure(0, weight=1)
+
+        header_right = tk.Frame(right_panel, bg=self.PANEL)
+        header_right.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        tk.Label(
+            header_right, text="2D GEOMETRY PREVIEW", bg=self.PANEL, fg=self.TEXT,
+            font=("Segoe UI", 11, "bold"),
+        ).pack(side="left")
+        tk.Label(
+            header_right, text="● Real-time sync", bg=self.PANEL, fg=self.SUCCESS,
+            font=("Segoe UI", 8, "bold"),
+        ).pack(side="right")
+
+        self.fg_canvas = tk.Canvas(
+            right_panel, bg="#0b1220", highlightbackground=self.BORDER,
+            highlightthickness=1, bd=0
+        )
+        self.fg_canvas.grid(row=1, column=0, sticky="nsew", pady=(0, 14))
+        self.fg_canvas.bind("<Configure>", lambda _e: self._redraw_frame_canvas())
+
+        self.fg_load_info = tk.Label(
+            right_panel, text="", bg=self.PANEL_ALT, fg=self.TEXT,
+            font=("Consolas", 8), padx=10, pady=6, anchor="w", justify="left"
+        )
+        self.fg_load_info.grid(row=2, column=0, sticky="ew", pady=(0, 14))
+
+        action_frame = tk.Frame(right_panel, bg=self.PANEL)
+        action_frame.grid(row=3, column=0, sticky="ew")
+        self._primary_button(action_frame, "Send to Active STAAD.Pro", self._send_frame_to_openstaad).pack(
+            side="left", padx=(0, 10)
+        )
+        self._secondary_button(action_frame, "Save .STD File...", self._save_frame_std_file).pack(
+            side="left"
+        )
+
+        self._redraw_frame_canvas()
+
+    def _section_header(self, parent: tk.Widget, text: str, row: int) -> None:
+        tk.Label(
+            parent, text=text, bg=self.PANEL, fg=self.ACCENT,
+            font=("Segoe UI", 8, "bold"),
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(14, 6))
+
+    def _form_row(self, parent: tk.Widget, label_text: str, variable: tk.Variable, row: int) -> int:
+        tk.Label(
+            parent, text=label_text, bg=self.PANEL, fg=self.MUTED,
+            font=("Segoe UI", 9),
+        ).grid(row=row, column=0, sticky="w", pady=3)
+        entry = self._dark_entry(parent, variable, width=16)
+        entry.grid(row=row, column=1, sticky="e", pady=3, padx=(10, 0))
+        entry.bind("<KeyRelease>", lambda _e: self._redraw_frame_canvas())
+        return row + 1
+
+    def _form_choice_row(self, parent: tk.Widget, label_text: str, variable: tk.StringVar, options: list[str], row: int) -> int:
+        tk.Label(
+            parent, text=label_text, bg=self.PANEL, fg=self.MUTED,
+            font=("Segoe UI", 9),
+        ).grid(row=row, column=0, sticky="w", pady=3)
+        combo = ttk.Combobox(parent, textvariable=variable, values=options, state="readonly", width=16)
+        combo.grid(row=row, column=1, sticky="e", pady=3, padx=(10, 0))
+        combo.bind("<<ComboboxSelected>>", lambda _e: self._redraw_frame_canvas())
+        return row + 1
+
+    def _get_frame_params(self) -> FrameParameters:
+        return FrameParameters(
+            width=float(self.fg_width.get().strip()),
+            eave_height=float(self.fg_eave_height.get().strip()),
+            ridge_distance=float(self.fg_ridge_distance.get().strip()),
+            slope=float(self.fg_slope.get().strip()),
+            col_mode=self.fg_col_mode.get(),
+            col_input=self.fg_col_input.get().strip(),
+            brick_wall_height=float(self.fg_brick_wall_height.get().strip() or "0"),
+            mezzanine_enabled=self.fg_mezzanine_enabled.get(),
+            mezzanine_height=float(self.fg_mezzanine_height.get().strip() or "0"),
+            mezzanine_start_x=float(self.fg_mezzanine_start_x.get().strip() or "0"),
+            mezzanine_end_x=float(self.fg_mezzanine_end_x.get().strip() or "0"),
+            bay_spacing=float(self.fg_bay_spacing.get().strip() or "6"),
+            left_support=self.fg_left_support.get(),
+            right_support=self.fg_right_support.get(),
+            int_support=self.fg_int_support.get(),
+            basic_wind_speed=float(self.fg_basic_wind_speed.get().strip() or "39"),
+            seismic_zone=self.fg_seismic_zone.get(),
+            dead_load=float(self.fg_dead_load.get().strip() or "0"),
+            roof_live_load=float(self.fg_roof_live_load.get().strip() or "0"),
+            collateral_load=float(self.fg_collateral_load.get().strip() or "0"),
+            mezzanine_live_load=float(self.fg_mezzanine_live_load.get().strip() or "0"),
+            mezzanine_dead_load=float(self.fg_mezzanine_dead_load.get().strip() or "0"),
+            design_code=self.fg_design_code.get(),
+        )
+
+    def _redraw_frame_canvas(self) -> None:
+        if not hasattr(self, "fg_canvas"):
+            return
+        c = self.fg_canvas
+        c.delete("all")
+
+        try:
+            params = self._get_frame_params()
+            geom = compute_frame_geometry(params)
+        except Exception as exc:
+            c.create_text(
+                20, 20, text=f"Preview unavailable: {exc}",
+                anchor="nw", fill=self.ERROR, font=("Segoe UI", 9, "bold")
+            )
+            return
+
+        cw = c.winfo_width() or 480
+        ch = c.winfo_height() or 360
+        margin = 45
+
+        max_x = params.width
+        max_y = max(geom.ridge_height, params.eave_height) * 1.15
+
+        if max_x <= 0 or max_y <= 0:
+            return
+
+        scale_x = (cw - 2 * margin) / max_x
+        scale_y = (ch - 2 * margin) / max_y
+        scale = min(scale_x, scale_y)
+
+        ox = margin + ((cw - 2 * margin) - max_x * scale) / 2
+        oy = ch - margin
+
+        def to_c(x: float, y: float) -> tuple[float, float]:
+            return (ox + x * scale, oy - y * scale)
+
+        gx1, gy1 = to_c(-params.width * 0.05, 0)
+        gx2, gy2 = to_c(params.width * 1.05, 0)
+        c.create_line(gx1, gy1, gx2, gy2, fill="#334155", width=2)
+        for hx in range(int(gx1), int(gx2), 15):
+            c.create_line(hx, gy1, hx - 6, gy1 + 8, fill="#1e293b", width=1)
+
+        node_map = {n.id: n for n in geom.nodes}
+        for m in geom.members:
+            n1 = node_map[m.start_node]
+            n2 = node_map[m.end_node]
+            x1, y1 = to_c(n1.x, n1.y)
+            x2, y2 = to_c(n2.x, n2.y)
+
+            if m.group_type == "outer_column":
+                c.create_line(x1, y1, x2, y2, fill="#3b82f6", width=3)
+            elif m.group_type == "rafter":
+                c.create_line(x1, y1, x2, y2, fill="#38bdf8", width=3)
+            elif m.group_type == "interior_column":
+                c.create_line(x1, y1, x2, y2, fill="#818cf8", width=2, dash=(4, 2))
+            elif m.group_type == "mezzanine":
+                c.create_line(x1, y1, x2, y2, fill="#f59e0b", width=3)
+
+        if params.brick_wall_height > 0.001:
+            bw_y = params.brick_wall_height
+            bx1, by1 = to_c(0, bw_y)
+            bx2, by2 = to_c(params.width, bw_y)
+            c.create_line(bx1 - 5, by1, bx1 + 5, by1, fill="#f43f5e", width=2)
+            c.create_line(bx2 - 5, by2, bx2 + 5, by2, fill="#f43f5e", width=2)
+            c.create_text(bx1 - 12, by1, text=f"BW {bw_y}m", fill="#f43f5e", font=("Segoe UI", 7), anchor="e")
+
+        for n in geom.nodes:
+            nx, ny = to_c(n.x, n.y)
+            color = "#38bdf8" if n.tag == "ridge" else ("#f59e0b" if n.tag == "mezzanine" else "#64748b")
+            r = 3.5 if n.tag in ("ridge", "eave", "base") else 2.5
+            c.create_oval(nx - r, ny - r, nx + r, ny + r, fill=color, outline="#0b1220")
+
+        def draw_support(nid: int, supp_type: str):
+            n = node_map[nid]
+            sx, sy = to_c(n.x, n.y)
+            if supp_type == "Pinned":
+                c.create_polygon(sx, sy, sx - 8, sy + 12, sx + 8, sy + 12, fill="", outline="#fbbf24", width=2)
+            else:
+                c.create_rectangle(sx - 10, sy, sx + 10, sy + 6, fill="#fbbf24", outline="")
+
+        draw_support(geom.left_support_node, params.left_support)
+        draw_support(geom.right_support_node, params.right_support)
+        for inid in geom.interior_support_nodes:
+            draw_support(inid, params.int_support)
+
+        dim_y = oy + 25
+        cx0, _ = to_c(0, 0)
+        cxw, _ = to_c(params.width, 0)
+        c.create_line(cx0, dim_y, cxw, dim_y, fill=self.MUTED, arrow="both", arrowshape=(6, 8, 3))
+        c.create_text((cx0 + cxw) / 2, dim_y + 12, text=f"Width = {params.width:.1f} m", fill=self.TEXT, font=("Segoe UI", 8))
+
+        dim_x_l = ox - 25
+        _, cy_eave = to_c(0, params.eave_height)
+        c.create_line(dim_x_l, oy, dim_x_l, cy_eave, fill=self.MUTED, arrow="both", arrowshape=(6, 8, 3))
+        c.create_text(dim_x_l - 6, (oy + cy_eave) / 2, text=f"Eave {params.eave_height:.1f}m", fill=self.TEXT, font=("Segoe UI", 8), anchor="e")
+
+        cx_r, cy_r = to_c(params.ridge_distance, geom.ridge_height)
+        c.create_text(cx_r, cy_r - 12, text=f"Ridge {geom.ridge_height:.2f}m", fill="#38bdf8", font=("Segoe UI", 8, "bold"))
+
+        w_dl = params.dead_load * params.bay_spacing
+        w_rll = params.roof_live_load * params.bay_spacing
+        w_cl = params.collateral_load * params.bay_spacing
+        info = f"LOAD CONVERSIONS (Bay Spacing = {params.bay_spacing:.1f} m):\n"
+        info += f"• Rafter Dead Load: {w_dl:.2f} kN/m  |  Rafter Roof Live Load: {w_rll:.2f} kN/m  |  Collateral Load: {w_cl:.2f} kN/m\n"
+        if params.mezzanine_enabled:
+            w_mll = params.mezzanine_live_load * params.bay_spacing
+            w_mdl = params.mezzanine_dead_load * params.bay_spacing
+            info += f"• Mezzanine Live Load: {w_mll:.2f} kN/m  |  Mezzanine Dead Load: {w_mdl:.2f} kN/m"
+        else:
+            info += "• Mezzanine: Disabled"
+
+        self.fg_load_info.configure(text=info)
+
+    def _send_frame_to_openstaad(self) -> None:
+        self._set_status("Connecting to STAAD.Pro and constructing 2D Frame…", "muted")
+        self.root.update_idletasks()
+        try:
+            params = self._get_frame_params()
+            staad = OpenStaad.connect()
+            build_model_in_openstaad(staad, params)
+            self._set_status("2D Frame successfully constructed in active STAAD.Pro model!", "success")
+        except (OpenStaadError, OSError, TypeError, ValueError) as exc:
+            self._set_status(str(exc), "error")
+
+    def _save_frame_std_file(self) -> None:
+        try:
+            params = self._get_frame_params()
+            std_content = generate_std_file_content(params)
+
+            default_filename = f"2D_Frame_{params.width}x{params.eave_height}m.std"
+            selected = filedialog.asksaveasfilename(
+                parent=self.root,
+                title="Save STAAD.Pro Model (.STD)",
+                initialdir=Path.cwd(),
+                initialfile=default_filename,
+                defaultextension=".std",
+                filetypes=(("STAAD Files", "*.std"), ("All Files", "*.*")),
+            )
+            if selected:
+                Path(selected).write_text(std_content, encoding="utf-8")
+                self._set_status(f"Saved STAAD file to {selected}", "success")
+        except (OSError, TypeError, ValueError) as exc:
+            self._set_status(str(exc), "error")
 
     def _set_status(self, message: str, kind: str = "muted") -> None:
         colors = {
