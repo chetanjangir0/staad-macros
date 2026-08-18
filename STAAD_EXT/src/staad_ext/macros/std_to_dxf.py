@@ -145,7 +145,11 @@ def member_envelope(staad: OpenStaad, beam_no: int, length: float) -> SectionEnv
 
 
 def _mm(value: float) -> str:
-    return f"{abs(value) * 1000:.3f}".rstrip("0").rstrip(".")
+    # Round to 0.1mm: fine enough for a steel dimension call-out, and coarse
+    # enough to absorb the float noise left over from unit conversion (a
+    # value meant to be an exact 400mm can come back as 399.9999999... after
+    # round-tripping through the model's base unit).
+    return f"{round(abs(value) * 1000, 1):.1f}".rstrip("0").rstrip(".")
 
 
 def _tube_pipe_name(staad: OpenStaad, beam_no: int, envelope: SectionEnvelope, name: str) -> str:

@@ -35,7 +35,10 @@ class _SummaryItem:
 
 
 def _mm(value_m: float) -> str:
-    return f"{abs(value_m) * 1000.0:.2f}".rstrip("0").rstrip(".")
+    # Round to 0.1mm to absorb float noise left over from unit conversion
+    # (an exact 400mm dimension can come back as 399.9999999... after
+    # round-tripping through the model's base unit).
+    return f"{round(abs(value_m) * 1000.0, 1):.1f}".rstrip("0").rstrip(".")
 
 
 def _tapered_i_items(beam_no: int, length_m: float, values: list[float]) -> list[_SummaryItem]:

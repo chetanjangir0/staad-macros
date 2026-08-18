@@ -8,6 +8,12 @@ from staad_ext.models import Point3D
 
 PROG_ID = "StaadPro.OpenSTAAD"
 
+# STAAD.Pro OpenSTAADUI::GetBaseUnit() returns 1 for the English base unit
+# system (lengths in inches) or 2 for Metric (lengths in meters). Every
+# geometry/property value this facade returns is normalized to meters using
+# this factor so callers never have to special-case the model's base unit.
+_INCHES_TO_METERS = 0.0254
+
 
 class OpenStaadError(RuntimeError):
     """Raised when STAAD.Pro cannot provide the requested model data."""
@@ -25,12 +31,13 @@ class OpenStaad:
 
     def __init__(self, application: Any) -> None:
         self._application = application
+        self._length_scale: float | None = None
         self.geometry = application.Geometry
         self.property = application.Property
         self.support = application.Support
         self.output = application.Output
         self.load = application.Load
-        _flag_methods(application, ("GetSTAADFile",))
+        _flag_methods(application, ("GetSTAADFile", "GetBaseUnit"))
         _flag_methods(
             self.geometry,
             ("GetNoOfSelectedBeams", "GetSelectedBeams", "GetMemberIncidence",
@@ -60,6 +67,16 @@ class OpenStaad:
                 "Could not attach to STAAD.Pro. Ensure STAAD.Pro 2025 is running "
                 "and that 'comtypes' is installed in a matching Python architecture."
             ) from exc
+
+    def base_unit(self) -> int:
+        """Return the current .STD file's base unit: 1 = English, 2 = Metric."""
+        return int(self._application.GetBaseUnit())
+
+    def length_scale(self) -> float:
+        """Return the factor that converts the model's base length unit to meters."""
+        if self._length_scale is None:
+            self._length_scale = _INCHES_TO_METERS if self.base_unit() == 1 else 1.0
+        return self._length_scale
 
     def model_path(self) -> Path:
         # STAAD.Pro 2025 documents this as:
@@ -138,10 +155,11 @@ class OpenStaad:
     def node_coordinates(self, node_no: int) -> Point3D:
         x, y, z = c_double(), c_double(), c_double()
         self.geometry.GetNodeCoordinates(node_no, byref(x), byref(y), byref(z))
-        return Point3D(x.value, y.value, z.value)
+        scale = self.length_scale()
+        return Point3D(x.value * scale, y.value * scale, z.value * scale)
 
     def beam_length(self, beam_no: int) -> float:
-        return float(self.geometry.GetBeamLength(beam_no))
+        return float(self.geometry.GetBeamLength(beam_no)) * self.length_scale()
 
     def section_name(self, beam_no: int) -> str:
         try:
@@ -156,9 +174,14 @@ class OpenStaad:
         return name or "NO SECTION"
 
     def beam_property_all(self, beam_no: int) -> tuple[float, ...]:
+        # Order: Width, Depth, Ax (area), Ay (area), Az (area), Ix, Iy, Iz
+        # (all length**4), Tf, Tw -- see OSPropertyUI::GetBeamPropertyAll.
         values = [c_double() for _ in range(10)]
         self.property.GetBeamPropertyAll(beam_no, *(byref(value) for value in values))
-        return tuple(value.value for value in values)
+        scale = self.length_scale()
+        exponents = (1, 1, 2, 2, 2, 4, 4, 4, 1, 1)
+        return tuple(value.value * scale ** exponent
+                     for value, exponent in zip(values, exponents))
 
     def section_property_values(self, beam_no: int) -> tuple[int, list[float]]:
         from comtypes.safearray import _midlSAFEARRAY
@@ -168,7 +191,8 @@ class OpenStaad:
         self.property.GetBeamSectionPropertyValuesEx(
             beam_no, byref(property_type), byref(values)
         )
-        return int(property_type.value), [float(value) for value in values.unpack()]
+        scale = self.length_scale()
+        return int(property_type.value), [float(value) * scale for value in values.unpack()]
 
     def support_nodes(self) -> list[int]:
         """Return every supported node in the current model."""
