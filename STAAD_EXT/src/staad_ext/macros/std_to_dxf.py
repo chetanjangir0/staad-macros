@@ -14,10 +14,33 @@ MIN_LABEL_HEIGHT = 0.05
 LABEL_WIDTH_FACTOR = 0.7
 LABEL_MAX_SPAN_FACTOR = 0.8
 TUBE_PIPE_TYPES = {650, 654, 655, 660, 675, 695, 696}
-SECTION_COLOR_PALETTE = (
-    1, 2, 3, 4, 5, 6, 9, 30, 40, 50, 60, 70, 80, 90, 100, 110, 130, 140,
-    150, 160, 170, 180, 190, 200, 210, 220, 230, 240, 250, 11, 12, 13, 14,
-)
+
+
+def _build_section_color_palette() -> tuple[int, ...]:
+    """Build a large, visually distinct AutoCAD Color Index (ACI) palette.
+
+    ACI indices 10-249 fall into 24 hue "bands" of 10 shades each
+    (band base, base+1, ... base+9), so cycling through every band's base
+    shade first gives 24 maximally distinct hues; once those are used up,
+    later shade offsets are layered in (still same 24 hues, but lighter or
+    darker) so colors keep spreading out instead of repeating outright.
+    True-color (DXF group 420) was tried and rejected: AutoCAD refuses to
+    open an R12-header (AC1009) file containing it, so only plain ACI
+    (group 62) values -- valid at any DXF version -- are used here.
+    """
+    basics = (1, 2, 3, 4, 5, 6, 8, 9)
+    hue_bases = tuple(range(10, 250, 10))
+    shade_offsets = (0, 5, 2, 7, 4, 9, 1, 6, 3, 8)
+    banded = tuple(
+        base + offset
+        for offset in shade_offsets
+        for base in hue_bases
+        if base + offset <= 249
+    )
+    return basics + banded
+
+
+SECTION_COLOR_PALETTE = _build_section_color_palette()
 
 
 def section_size_key(envelope: SectionEnvelope, name: str) -> tuple:
@@ -37,7 +60,7 @@ def section_size_key(envelope: SectionEnvelope, name: str) -> tuple:
 
 
 def assign_section_colors(envelopes: dict[int, SectionEnvelope], names: dict[int, str]) -> dict[int, int]:
-    """Assign a stable DXF color index per beam based on its section size."""
+    """Assign a stable DXF (ACI) color index per beam based on its section size."""
     keys = {beam: section_size_key(envelopes[beam], names[beam]) for beam in names}
     unique_keys = sorted(set(keys.values()), key=lambda key: (key[0], key[1], key[2], key[3]))
     color_by_key = {key: SECTION_COLOR_PALETTE[index % len(SECTION_COLOR_PALETTE)]
