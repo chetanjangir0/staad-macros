@@ -34,6 +34,7 @@ def ask_export_settings(
     labels = BooleanVar(master=window, value=True)
     peb_joins = BooleanVar(master=window, value=False)
     connection_faces = BooleanVar(master=window, value=False)
+    color_by_section = BooleanVar(master=window, value=True)
     scale = DoubleVar(master=window, value=1.0)
     result: list[tuple[Path, ExportSettings]] = []
 
@@ -58,6 +59,7 @@ def ask_export_settings(
                 float(scale.get()),
                 peb_joins.get(),
                 connection_faces.get(),
+                color_by_section.get(),
             )
             if not target.name:
                 raise ValueError("Choose an output file.")
@@ -101,15 +103,20 @@ def ask_export_settings(
         text="Show GA connection details",
         variable=connection_faces,
     ).grid(row=6, column=0, pady=(6, 2), sticky="w")
+    ttk.Checkbutton(
+        frame,
+        text="Color members by section size",
+        variable=color_by_section,
+    ).grid(row=7, column=0, pady=(6, 2), sticky="w")
     ttk.Label(frame, text="Text size scale (0.1-10.0)").grid(
-        row=7, column=0, sticky="w"
+        row=8, column=0, sticky="w"
     )
     ttk.Entry(frame, textvariable=scale, width=12).grid(
-        row=8, column=0, sticky="w"
+        row=9, column=0, sticky="w"
     )
 
     actions = ttk.Frame(frame)
-    actions.grid(row=9, column=0, columnspan=2, pady=(18, 0), sticky="e")
+    actions.grid(row=10, column=0, columnspan=2, pady=(18, 0), sticky="e")
     ttk.Button(actions, text="Cancel", command=window.destroy).pack(
         side="left", padx=4
     )

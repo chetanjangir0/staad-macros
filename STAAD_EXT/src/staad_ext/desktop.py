@@ -404,6 +404,7 @@ class StaadExtApplication:
         self.dxf_labels = tk.BooleanVar(value=True)
         self.dxf_peb_joins = tk.BooleanVar(value=False)
         self.dxf_connection_faces = tk.BooleanVar(value=False)
+        self.dxf_color_by_section = tk.BooleanVar(value=True)
         self.dxf_scale = tk.StringVar(value="1.0")
 
         self._field_label(panel, "OUTPUT FILE", 0)
@@ -441,6 +442,9 @@ class StaadExtApplication:
             anchor="w", pady=5)
         self._dark_check(
             checks, "Show GA connection details", self.dxf_connection_faces
+        ).pack(anchor="w", pady=(0, 5))
+        self._dark_check(
+            checks, "Color members by section size", self.dxf_color_by_section
         ).pack(anchor="w")
         self._primary_button(panel, "Export selected members", self._export_dxf).grid(
             row=4, column=0, sticky="w")
@@ -504,6 +508,7 @@ class StaadExtApplication:
                 float(self.dxf_scale.get()),
                 self.dxf_peb_joins.get(),
                 self.dxf_connection_faces.get(),
+                self.dxf_color_by_section.get(),
             )
             count = export_selected_members(OpenStaad.connect(), output, settings)
             if count:

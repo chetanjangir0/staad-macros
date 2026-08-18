@@ -24,6 +24,7 @@ class ExportSettings:
     text_scale: float = 1.0
     peb_corner_joins: bool = False
     connection_face_lines: bool = False
+    color_by_section: bool = True
 
     def __post_init__(self) -> None:
         if not 0.1 <= self.text_scale <= 10.0:

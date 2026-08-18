@@ -14,6 +14,35 @@ MIN_LABEL_HEIGHT = 0.05
 LABEL_WIDTH_FACTOR = 0.7
 LABEL_MAX_SPAN_FACTOR = 0.8
 TUBE_PIPE_TYPES = {650, 654, 655, 660, 675, 695, 696}
+SECTION_COLOR_PALETTE = (
+    1, 2, 3, 4, 5, 6, 9, 30, 40, 50, 60, 70, 80, 90, 100, 110, 130, 140,
+    150, 160, 170, 180, 190, 200, 210, 220, 230, 240, 250, 11, 12, 13, 14,
+)
+
+
+def section_size_key(envelope: SectionEnvelope, name: str) -> tuple:
+    """Key identifying members that share the same drawn section size.
+
+    Two members can share the same STAAD section name (e.g. a generic
+    "PRISMATIC" tapered section name) while having different actual
+    dimensions, so the key is based on the resolved envelope geometry
+    rather than the name alone.
+    """
+    return (
+        envelope.property_type,
+        round(envelope.start_half_width, 4),
+        round(envelope.end_half_width, 4),
+        name,
+    )
+
+
+def assign_section_colors(envelopes: dict[int, SectionEnvelope], names: dict[int, str]) -> dict[int, int]:
+    """Assign a stable DXF color index per beam based on its section size."""
+    keys = {beam: section_size_key(envelopes[beam], names[beam]) for beam in names}
+    unique_keys = sorted(set(keys.values()), key=lambda key: (key[0], key[1], key[2], key[3]))
+    color_by_key = {key: SECTION_COLOR_PALETTE[index % len(SECTION_COLOR_PALETTE)]
+                    for index, key in enumerate(unique_keys)}
+    return {beam: color_by_key[key] for beam, key in keys.items()}
 
 
 def project(point: Point3D, plane: ViewPlane) -> Point3D:
@@ -143,8 +172,9 @@ def _label(staad: OpenStaad, beam_no: int, name: str, length: float, property_ty
     return f"{name}\\P({length:.3f}M)" if name else f"({length:.3f}M)"
 
 
-def _line(writer: DxfWriter, layer: str, a: Point3D, b: Point3D, kind: str = "CONTINUOUS") -> None:
-    writer.line(layer, a, b, kind)
+def _line(writer: DxfWriter, layer: str, a: Point3D, b: Point3D, kind: str = "CONTINUOUS",
+          color: int | None = None) -> None:
+    writer.line(layer, a, b, kind, color=color)
 
 
 def _envelope_points(start: Point3D, end: Point3D, envelope: SectionEnvelope,
@@ -169,7 +199,8 @@ def _envelope_points(start: Point3D, end: Point3D, envelope: SectionEnvelope,
 
 
 def _write_envelope(writer: DxfWriter, outline: list[Point3D], envelope: SectionEnvelope,
-                    name: str, open_start: bool = False, open_end: bool = False) -> None:
+                    name: str, open_start: bool = False, open_end: bool = False,
+                    color: int | None = None) -> None:
     p1, p2, p3, p4 = outline
     layer = "TUBE_PIPE_SECTION" if is_tube_or_pipe(envelope.property_type, name) else "MEMBER_SECTION"
     if is_tapered(envelope, name):
@@ -180,14 +211,14 @@ def _write_envelope(writer: DxfWriter, outline: list[Point3D], envelope: Section
     if not open_end:
         edges.append((p2, p4))
     for a, b in edges:
-        _line(writer, layer, a, b)
+        _line(writer, layer, a, b, color=color)
     if is_tube_or_pipe(envelope.property_type, name) and not is_tapered(envelope, name):
         for fraction in (0.175, 0.825):
             hidden_start = Point3D(p1.x + (p3.x - p1.x) * fraction,
                                    p1.y + (p3.y - p1.y) * fraction)
             hidden_end = Point3D(p2.x + (p4.x - p2.x) * fraction,
                                  p2.y + (p4.y - p2.y) * fraction)
-            _line(writer, "TUBE_PIPE_SECTION", hidden_start, hidden_end, "HIDDEN")
+            _line(writer, "TUBE_PIPE_SECTION", hidden_start, hidden_end, "HIDDEN", color=color)
 
 
 def _line_intersection(a: Point3D, b: Point3D, c: Point3D, d: Point3D) -> Point3D | None:
@@ -612,7 +643,7 @@ def _move(point: Point3D, vector: Point3D, amount: float) -> Point3D:
 
 
 def _write_label(writer: DxfWriter, start: Point3D, end: Point3D, value: str,
-                 half_width: float, settings: ExportSettings) -> None:
+                 half_width: float, settings: ExportSettings, color: int = 7) -> None:
     if end.x < start.x:
         start, end = end, start
     length = dist((start.x, start.y, start.z), (end.x, end.y, end.z))
@@ -627,7 +658,7 @@ def _write_label(writer: DxfWriter, start: Point3D, end: Point3D, value: str,
     middle = Point3D((start.x + end.x) / 2, (start.y + end.y) / 2, (start.z + end.z) / 2)
     location = _move(middle, unit, half_width + height * 1.5)
     writer.colored_label("MEMBER_LABELS", location, height,
-                         degrees(atan2(end.y - start.y, end.x - start.x)), value, unit)
+                         degrees(atan2(end.y - start.y, end.x - start.x)), value, unit, color)
 
 
 def _connected_fixed_width(staad: OpenStaad, beam_numbers: list[int], target: int,
@@ -700,6 +731,7 @@ def export_selected_members(staad: OpenStaad, output: Path, settings: ExportSett
     open_ends: set[tuple[int, int]] = set()
     if settings.peb_corner_joins or settings.connection_face_lines:
         open_ends = apply_peb_corner_joins(outlines, incidences, points)
+    section_colors = assign_section_colors(envelopes, names) if settings.color_by_section else {}
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("w", encoding="ascii", newline="\n") as stream:
         writer = DxfWriter(stream)
@@ -707,14 +739,16 @@ def export_selected_members(staad: OpenStaad, output: Path, settings: ExportSett
         for beam in valid:
             start, end = points[beam]
             envelope, name = envelopes[beam], names[beam]
+            color = section_colors.get(beam)
             writer.line("MEMBER_CENTERLINE", start, end, "DASHED")
             _write_envelope(
                 writer, outlines[beam], envelope, name,
                 (beam, 0) in open_ends, (beam, 1) in open_ends,
+                color=color,
             )
             if settings.write_labels:
                 _write_label(writer, start, end, _label(staad, beam, name, lengths[beam], envelope.property_type),
-                             max(envelope.start_half_width, envelope.end_half_width), settings)
+                             max(envelope.start_half_width, envelope.end_half_width), settings, color or 7)
         if settings.connection_face_lines:
             write_connection_face_lines(writer, outlines, points, open_ends)
         writer.footer()

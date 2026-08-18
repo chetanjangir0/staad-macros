@@ -41,10 +41,15 @@ class DxfWriter:
     def _linetype(self, name: str, description: str, count: int, length: float) -> None:
         self._pairs(0, "LTYPE", 2, name, 70, 0, 3, description, 72, 65, 73, count, 40, self.number(length))
 
-    def line(self, layer: str, start: Point3D, end: Point3D, linetype: str = "CONTINUOUS") -> None:
-        self._pairs(0, "LINE", 8, layer, 6, linetype, 10, self.number(start.x), 20,
-                    self.number(start.y), 30, self.number(start.z), 11, self.number(end.x),
-                    21, self.number(end.y), 31, self.number(end.z))
+    def line(self, layer: str, start: Point3D, end: Point3D, linetype: str = "CONTINUOUS",
+             color: int | None = None) -> None:
+        pairs: list[object] = [0, "LINE", 8, layer]
+        if color is not None:
+            pairs += [62, color]
+        pairs += [6, linetype, 10, self.number(start.x), 20,
+                  self.number(start.y), 30, self.number(start.z), 11, self.number(end.x),
+                  21, self.number(end.y), 31, self.number(end.z)]
+        self._pairs(*pairs)
 
 
     def text(self, layer: str, point: Point3D, height: float, rotation: float,
@@ -56,17 +61,17 @@ class DxfWriter:
                     21, self.number(point.y), 31, self.number(point.z))
 
     def colored_label(self, layer: str, point: Point3D, height: float, rotation: float,
-                      value: str, offset: Point3D) -> None:
+                      value: str, offset: Point3D, color: int = 7) -> None:
         lines = value.split(r"\P")
         for index, label_line in enumerate(lines):
             amount = ((len(lines) - 1) / 2 - index) * height * 1.25
             location = Point3D(point.x + offset.x * amount, point.y + offset.y * amount,
                                point.z + offset.z * amount)
-            self._colored_label_line(layer, location, height, rotation, label_line)
+            self._colored_label_line(layer, location, height, rotation, label_line, color)
 
     def _colored_label_line(self, layer: str, point: Point3D, height: float,
-                            rotation: float, value: str) -> None:
-        self.text(layer, point, height, rotation, value, 7)
+                            rotation: float, value: str, color: int) -> None:
+        self.text(layer, point, height, rotation, value, color)
 
     def footer(self) -> None:
         self._pairs(0, "ENDSEC", 0, "EOF")
