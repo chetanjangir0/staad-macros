@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date
 import math
 from typing import Any
 
@@ -299,7 +300,7 @@ def generate_std_file_content(params: FrameParameters) -> str:
     lines.append(f"*** Bay Spacing: {params.bay_spacing:.2f} m | Design Code: {params.design_code}")
     lines.append("*** ------------------------------------------------------------------")
     lines.append("START JOB INFORMATION")
-    lines.append("ENGINEER DATE")
+    lines.append(f"ENGINEER DATE {date.today().strftime('%d-%b-%y')}")
     lines.append("END JOB INFORMATION")
     lines.append("INPUT WIDTH 79")
     lines.append("UNIT METER KN")
