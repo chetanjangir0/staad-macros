@@ -5,6 +5,8 @@ from tkinter import Misc, messagebox
 
 from staad_ext.macros.plate_summary import selected_member_plate_summary
 from staad_ext.macros.std_to_dxf import export_selected_members
+from staad_ext.macros.std_to_ifc import export_structure
+from staad_ext.models import IfcExportSettings
 from staad_ext.openstaad import OpenStaad, OpenStaadError
 from staad_ext.ui import ask_export_settings, show_plate_summary
 
@@ -41,6 +43,35 @@ def run_std_to_dxf(parent: Misc | None = None) -> bool:
             "DXF created, but no selected members were exported.\n\n"
             "Select one or more analytical beam members in STAAD.Pro and retry.\n\n"
             f"{output}",
+            parent=parent,
+        )
+    except (OpenStaadError, OSError, TypeError, ValueError) as exc:
+        messagebox.showerror("STAAD_EXT", str(exc), parent=parent)
+    return False
+
+
+def run_std_to_ifc(parent: Misc | None = None) -> bool:
+    """Run the whole-structure IFC export workflow."""
+    try:
+        staad = OpenStaad.connect()
+        try:
+            model = staad.model_path()
+        except OpenStaadError:
+            model = Path.cwd() / "STAAD_Model.std"
+
+        output = model.with_name(f"{model.stem}_3D_Structure.ifc")
+        count = export_structure(staad, output, IfcExportSettings())
+        if count:
+            messagebox.showinfo(
+                "STAAD_EXT",
+                f"IFC created successfully:\n{output}\n\nMembers exported: {count}",
+                parent=parent,
+            )
+            return True
+
+        messagebox.showwarning(
+            "STAAD_EXT",
+            f"IFC created, but the model has no analytical beam members.\n\n{output}",
             parent=parent,
         )
     except (OpenStaadError, OSError, TypeError, ValueError) as exc:

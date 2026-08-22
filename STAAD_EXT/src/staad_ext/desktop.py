@@ -34,7 +34,8 @@ from staad_ext.macros.support_reactions import (
     reaction_envelopes,
 )
 from staad_ext.macros.std_to_dxf import export_selected_members
-from staad_ext.models import ExportSettings, ViewPlane
+from staad_ext.macros.std_to_ifc import export_structure
+from staad_ext.models import ExportSettings, IfcExportSettings, ViewPlane
 from staad_ext.openstaad import OpenStaad, OpenStaadError
 
 
@@ -68,6 +69,13 @@ UTILITY_VIEWS = (
         "STD to DXF",
         "Export selected analytical members and section envelopes to AutoCAD.",
         "_build_dxf_view",
+    ),
+    UtilityView(
+        "std_to_ifc",
+        "STD to IFC (3D)",
+        "STD to IFC",
+        "Export the whole analytical model as a 3D IFC file for BIM viewers.",
+        "_build_ifc_view",
     ),
     UtilityView(
         "plate_summary",
@@ -518,6 +526,66 @@ class StaadExtApplication:
             else:
                 self._set_status(
                     "No members exported. Select analytical members in STAAD.Pro and retry.",
+                    "warning",
+                )
+        except (OpenStaadError, OSError, TypeError, ValueError) as exc:
+            self._set_status(str(exc), "error")
+
+    def _build_ifc_view(self, utility: UtilityView) -> None:
+        self._page_header(utility.title, utility.description)
+        panel = self._panel(self.content, 24)
+        panel.pack(fill="x")
+        panel.grid_columnconfigure(0, weight=1)
+
+        self.ifc_path = tk.StringVar(value=str(Path.cwd() / "STAAD_Model_3D_Structure.ifc"))
+        self.ifc_selected_only = tk.BooleanVar(value=False)
+
+        self._field_label(panel, "OUTPUT FILE", 0)
+        path_row = tk.Frame(panel, bg=self.PANEL)
+        path_row.grid(row=1, column=0, sticky="ew", pady=(7, 19))
+        path_row.grid_columnconfigure(0, weight=1)
+        self._dark_entry(path_row, self.ifc_path).grid(row=0, column=0, sticky="ew")
+        self._secondary_button(path_row, "Browse", self._browse_ifc).grid(
+            row=0, column=1, padx=(10, 0))
+
+        self._dark_check(
+            panel, "Export selected members only (default: whole model)",
+            self.ifc_selected_only,
+        ).grid(row=2, column=0, sticky="w", pady=(0, 19))
+
+        self._primary_button(panel, "Export structure to IFC", self._export_ifc).grid(
+            row=3, column=0, sticky="w")
+
+    def _browse_ifc(self) -> None:
+        current = Path(self.ifc_path.get())
+        selected = filedialog.asksaveasfilename(
+            parent=self.root,
+            title="Save IFC",
+            initialdir=current.parent,
+            initialfile=current.name,
+            defaultextension=".ifc",
+            filetypes=(("IFC files", "*.ifc"),),
+        )
+        if selected:
+            self.ifc_path.set(selected)
+
+    def _export_ifc(self) -> None:
+        self._set_status("Connecting to STAAD.Pro…", "muted")
+        self.root.update_idletasks()
+        try:
+            output = Path(self.ifc_path.get().strip()).with_suffix(".ifc")
+            if not output.name:
+                raise ValueError("Choose an output file.")
+            settings = IfcExportSettings(self.ifc_selected_only.get())
+            count = export_structure(OpenStaad.connect(), output, settings)
+            if count:
+                self._set_status(
+                    f"Exported {count} member(s) to {output}", "success"
+                )
+            else:
+                self._set_status(
+                    "No members exported. The model has no analytical beam members "
+                    "(or none are selected).",
                     "warning",
                 )
         except (OpenStaadError, OSError, TypeError, ValueError) as exc:

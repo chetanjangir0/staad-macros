@@ -36,3 +36,8 @@ class SectionEnvelope:
     start_half_width: float
     end_half_width: float
     property_type: int
+
+
+@dataclass(frozen=True, slots=True)
+class IfcExportSettings:
+    selected_only: bool = False

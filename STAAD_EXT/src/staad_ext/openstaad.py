@@ -41,12 +41,12 @@ class OpenStaad:
         _flag_methods(
             self.geometry,
             ("GetNoOfSelectedBeams", "GetSelectedBeams", "GetMemberIncidence",
-             "GetNodeCoordinates", "GetBeamLength"),
+             "GetNodeCoordinates", "GetBeamLength", "GetMemberCount", "GetBeamList"),
         )
         _flag_methods(
             self.property,
             ("GetBeamSectionDisplayName", "GetBeamSectionName",
-             "GetBeamPropertyAll", "GetBeamSectionPropertyValuesEx"),
+             "GetBeamPropertyAll", "GetBeamSectionPropertyValuesEx", "GetBetaAngle"),
         )
         _flag_methods(self.support, ("GetSupportCount", "GetSupportNodes"))
         _flag_methods(
@@ -146,6 +146,24 @@ class OpenStaad:
         numbers = _midlSAFEARRAY(c_long).create([0] * count)
         self.geometry.GetSelectedBeams(byref(numbers), 1)
         return [int(number) for number in numbers.unpack()]
+
+    def all_beams(self) -> list[int]:
+        """Return every analytical beam member number in the current model."""
+        from comtypes.safearray import _midlSAFEARRAY
+
+        count = int(self.geometry.GetMemberCount())
+        if count <= 0:
+            return []
+        numbers = _midlSAFEARRAY(c_long).create([0] * count)
+        self.geometry.GetBeamList(byref(numbers))
+        return [int(number) for number in numbers.unpack()]
+
+    def beta_angle(self, beam_no: int) -> float:
+        """Return the beta angle (degrees) assigned to a beam, or 0.0 if unavailable."""
+        try:
+            return float(self.property.GetBetaAngle(beam_no))
+        except (OSError, TypeError, ValueError):
+            return 0.0
 
     def member_incidence(self, beam_no: int) -> tuple[int, int]:
         start, end = c_long(), c_long()
