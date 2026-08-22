@@ -533,6 +533,8 @@ def generate_std_file_content(params: FrameParameters) -> str:
 
 def build_model_in_openstaad(staad: Any, params: FrameParameters) -> None:
     """Construct nodes, beams, and supports in active STAAD.Pro model via OpenSTAAD COM interface."""
+    from staad_ext.openstaad import OpenStaadError
+
     geom = compute_frame_geometry(params)
 
     # Units to Meter, KN (4=Meter, 5=KN in OpenSTAAD)
@@ -544,22 +546,18 @@ def build_model_in_openstaad(staad: Any, params: FrameParameters) -> None:
     geometry = staad.geometry
     support = staad.support
 
-    # Add Nodes
-    for n in geom.nodes:
-        try:
-            geometry.AddNode(n.x, n.y, n.z)
-        except Exception:
-            pass
-
-    # Add Beams
-    for m in geom.members:
-        try:
-            geometry.AddBeam(m.start_node, m.end_node)
-        except Exception:
-            pass
-
-    # Supports
     try:
+        # AddNode/AddBeam return the node/beam number STAAD.Pro actually
+        # assigned, which will not match this module's local 1..N node ids
+        # unless the active model is empty. Map local ids to the real
+        # STAAD node numbers before wiring up beams and supports.
+        node_id_map: dict[int, int] = {}
+        for n in geom.nodes:
+            node_id_map[n.id] = int(geometry.AddNode(n.x, n.y, n.z))
+
+        for m in geom.members:
+            geometry.AddBeam(node_id_map[m.start_node], node_id_map[m.end_node])
+
         s_fixed = support.CreateSupportFixed()
         s_pinned = support.CreateSupportPinned()
 
@@ -567,10 +565,14 @@ def build_model_in_openstaad(staad: Any, params: FrameParameters) -> None:
         s_right = s_fixed if params.right_support == "Fixed" else s_pinned
         s_int = s_fixed if params.int_support == "Fixed" else s_pinned
 
-        support.AssignSupportToNode(geom.left_support_node, s_left)
-        support.AssignSupportToNode(geom.right_support_node, s_right)
+        support.AssignSupportToNode(node_id_map[geom.left_support_node], s_left)
+        support.AssignSupportToNode(node_id_map[geom.right_support_node], s_right)
 
         for nid in geom.interior_support_nodes:
-            support.AssignSupportToNode(nid, s_int)
-    except Exception:
-        pass
+            support.AssignSupportToNode(node_id_map[nid], s_int)
+    except OpenStaadError:
+        raise
+    except Exception as exc:
+        raise OpenStaadError(
+            f"STAAD.Pro rejected the 2D frame model: {exc}"
+        ) from exc

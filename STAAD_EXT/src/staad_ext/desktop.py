@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import tkinter as tk
-from tkinter import filedialog, ttk
+from tkinter import filedialog, messagebox, ttk
 from typing import Callable
 
 from staad_ext.macros.frame_generator import (
@@ -1178,15 +1178,39 @@ class StaadExtApplication:
         self.fg_load_info.configure(text=info)
 
     def _send_frame_to_openstaad(self) -> None:
-        self._set_status("Connecting to STAAD.Pro and constructing 2D Frame…", "muted")
+        self._set_status("Connecting to STAAD.Pro…", "muted")
         self.root.update_idletasks()
         try:
             params = self._get_frame_params()
             staad = OpenStaad.connect()
+
+            existing_beams = staad.all_beams()
+            existing_nodes = staad.all_nodes()
+            if existing_beams or existing_nodes:
+                proceed = messagebox.askyesno(
+                    "Clear Existing Model?",
+                    f"The active STAAD.Pro model already has {len(existing_nodes)} node(s) "
+                    f"and {len(existing_beams)} beam(s).\n\n"
+                    "They must be deleted before the new 2D frame can be built, otherwise "
+                    "it will be added on top of the existing geometry.\n\n"
+                    "Delete the existing model and continue?",
+                    parent=self.root,
+                )
+                if not proceed:
+                    self._set_status("Send to STAAD.Pro cancelled.", "muted")
+                    return
+                self._set_status("Clearing existing model geometry…", "muted")
+                self.root.update_idletasks()
+                staad.clear_geometry()
+
+            self._set_status("Constructing 2D Frame in active STAAD.Pro model…", "muted")
+            self.root.update_idletasks()
             build_model_in_openstaad(staad, params)
             self._set_status("2D Frame successfully constructed in active STAAD.Pro model!", "success")
         except (OpenStaadError, OSError, TypeError, ValueError) as exc:
             self._set_status(str(exc), "error")
+        except Exception as exc:  # noqa: BLE001 - surface any COM failure instead of failing silently
+            self._set_status(f"Failed to build frame in STAAD.Pro: {exc}", "error")
 
     def _save_frame_std_file(self) -> None:
         try:

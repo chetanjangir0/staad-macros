@@ -37,18 +37,23 @@ class OpenStaad:
         self.support = application.Support
         self.output = application.Output
         self.load = application.Load
-        _flag_methods(application, ("GetSTAADFile", "GetBaseUnit"))
+        _flag_methods(application, ("GetSTAADFile", "GetBaseUnit", "SetInputUnits"))
         _flag_methods(
             self.geometry,
             ("GetNoOfSelectedBeams", "GetSelectedBeams", "GetMemberIncidence",
-             "GetNodeCoordinates", "GetBeamLength", "GetMemberCount", "GetBeamList"),
+             "GetNodeCoordinates", "GetBeamLength", "GetMemberCount", "GetBeamList",
+             "AddNode", "AddBeam", "GetNodeCount", "GetNodeList", "DeleteBeam", "DeleteNode"),
         )
         _flag_methods(
             self.property,
             ("GetBeamSectionDisplayName", "GetBeamSectionName",
              "GetBeamPropertyAll", "GetBeamSectionPropertyValuesEx", "GetBetaAngle"),
         )
-        _flag_methods(self.support, ("GetSupportCount", "GetSupportNodes"))
+        _flag_methods(
+            self.support,
+            ("GetSupportCount", "GetSupportNodes",
+             "CreateSupportFixed", "CreateSupportPinned", "AssignSupportToNode"),
+        )
         _flag_methods(
             self.output, ("AreResultsAvailable", "GetSupportReactions")
         )
@@ -157,6 +162,25 @@ class OpenStaad:
         numbers = _midlSAFEARRAY(c_long).create([0] * count)
         self.geometry.GetBeamList(byref(numbers))
         return [int(number) for number in numbers.unpack()]
+
+    def all_nodes(self) -> list[int]:
+        """Return every node number in the current model."""
+        from comtypes.safearray import _midlSAFEARRAY
+
+        count = int(self.geometry.GetNodeCount())
+        if count <= 0:
+            return []
+        numbers = _midlSAFEARRAY(c_long).create([0] * count)
+        self.geometry.GetNodeList(byref(numbers))
+        return [int(number) for number in numbers.unpack()]
+
+    def clear_geometry(self) -> None:
+        """Delete every beam and node in the current model (beams first, since a
+        node cannot be deleted while a member still references it)."""
+        for beam_no in self.all_beams():
+            self.geometry.DeleteBeam(beam_no)
+        for node_no in self.all_nodes():
+            self.geometry.DeleteNode(node_no)
 
     def beta_angle(self, beam_no: int) -> float:
         """Return the beta angle (degrees) assigned to a beam, or 0.0 if unavailable."""
