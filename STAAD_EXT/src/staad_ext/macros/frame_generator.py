@@ -24,6 +24,14 @@ class FrameParameters:
     right_support: str = "Fixed"  # "Fixed" or "Pinned"
     int_support: str = "Fixed"  # "Fixed" or "Pinned"
     basic_wind_speed: float = 39.0  # m/s
+    # "IS 875 Part 3" or "MBMA 12". Defaults to "MBMA 12" (no computed wind
+    # load, matching the pre-wind-load placeholder behavior) so constructing
+    # FrameParameters() never has the side effect of launching Excel COM.
+    wind_standard: str = "MBMA 12"
+    wind_building_length: float = 30.0  # m (overall building length, not bay spacing)
+    wind_design_life: int = 50  # years
+    wind_terrain_category: int = 2
+    wind_opening: str = "<5%"  # "<5%", "5-20%", ">20%"
     seismic_zone: str = "Zone III (0.16)"
     dead_load: float = 0.15  # kN/m2
     roof_live_load: float = 0.75  # kN/m2
@@ -51,6 +59,8 @@ class FrameParameters:
             )
         if self.bay_spacing <= 0:
             raise ValueError("Bay spacing must be greater than 0.")
+        if self.wind_standard == "IS 875 Part 3" and self.wind_building_length <= 0:
+            raise ValueError("Wind load building length must be greater than 0.")
         if self.mezzanine_enabled:
             if self.mezzanine_height <= 0 or self.mezzanine_height >= self.eave_height:
                 raise ValueError(
@@ -282,6 +292,44 @@ def compute_frame_geometry(params: FrameParameters) -> FrameGeometryData:
     )
 
 
+def wind_load_member_groups(
+    geom: FrameGeometryData, params: FrameParameters
+) -> tuple[list[int], list[int], list[int], list[int]]:
+    """Return (left_column, left_rafter, right_rafter, right_column) member ids
+    for mapping onto the IS 875 Part 3 wind load workbook's 'For STAAD' sheet.
+
+    Assumes the standard single-span gable case the workbook is built for:
+    one column line at x=0, one at x=width, and rafter segments split at the
+    ridge. Any interior columns/mezzanine beams are not part of the wind path.
+    """
+    node_map = {n.id: n for n in geom.nodes}
+
+    def column_ids(x_target: float) -> list[int]:
+        ids = [
+            m.id
+            for m in geom.members
+            if m.group_type == "outer_column"
+            and abs(node_map[m.start_node].x - x_target) < 1e-4
+            and abs(node_map[m.end_node].x - x_target) < 1e-4
+        ]
+        return sorted(ids, key=lambda mid: node_map[next(m for m in geom.members if m.id == mid).start_node].y)
+
+    def rafter_ids(before_ridge: bool) -> list[int]:
+        ids = []
+        for mid in geom.rafter_beams:
+            m = next(mm for mm in geom.members if mm.id == mid)
+            mid_x = (node_map[m.start_node].x + node_map[m.end_node].x) / 2
+            if (mid_x < params.ridge_distance) == before_ridge:
+                ids.append(mid)
+        return ids
+
+    left_column = column_ids(0.0)
+    right_column = column_ids(params.width)
+    left_rafter = rafter_ids(True)
+    right_rafter = rafter_ids(False)
+    return left_column, left_rafter, right_rafter, right_column
+
+
 def generate_std_file_content(params: FrameParameters) -> str:
     """Generate complete .STD file text content for STAAD.Pro."""
     geom = compute_frame_geometry(params)
@@ -372,15 +420,44 @@ def generate_std_file_content(params: FrameParameters) -> str:
         lines.append(f"*** {params.collateral_load:.2f} kN/m^2 x {params.bay_spacing:.2f} m (bay spacing) = {w_cl:.3f} kN/m")
         lines.append(f"{rafter_str} UNI GY -{w_cl:.3f}")
 
+    next_load_num = 4
     if params.mezzanine_enabled and mezz_str and w_mll > 0:
-        lines.append("LOAD 4 TITLE MEZZANINE LIVE LOAD")
+        lines.append(f"LOAD {next_load_num} TITLE MEZZANINE LIVE LOAD")
         lines.append("MEMBER LOAD")
         lines.append("*** Mezzanine Live Load Calculation:")
         lines.append(f"*** {params.mezzanine_live_load:.2f} kN/m^2 x {params.bay_spacing:.2f} m (bay spacing) = {w_mll:.3f} kN/m")
         lines.append(f"{mezz_str} UNI GY -{w_mll:.3f}")
+        next_load_num += 1
 
-    lines.append(f"LOAD 5 TITLE WIND LOAD (BASIC SPEED = {params.basic_wind_speed:.1f} M/S)")
-    lines.append(f"LOAD 6 TITLE SEISMIC LOAD (ZONE = {params.seismic_zone})")
+    if params.wind_standard == "IS 875 Part 3":
+        from staad_ext.macros.wind_load import Is875WindParameters, generate_is875_wind_load_lines
+
+        left_col, left_raf, right_raf, right_col = wind_load_member_groups(geom, params)
+        wind_params = Is875WindParameters(
+            building_length=params.wind_building_length,
+            width=params.width,
+            height=params.eave_height,
+            roof_slope_x=params.slope,
+            basic_wind_speed=params.basic_wind_speed,
+            design_life=params.wind_design_life,
+            terrain_category=params.wind_terrain_category,
+            bay_spacing=params.bay_spacing,
+            opening=params.wind_opening,
+        )
+        wind_lines = generate_is875_wind_load_lines(
+            wind_params, next_load_num, left_col, left_raf, right_raf, right_col
+        )
+        lines.extend(wind_lines)
+        # The workbook emits one "LOAD n ... TITLE WLx" header per wind load
+        # case (pressure/suction x wind direction x gable parallel cases) —
+        # count them rather than assuming a fixed number of cases.
+        next_load_num += sum(1 for wl in wind_lines if wl.strip().upper().startswith("LOAD "))
+    else:
+        lines.append(f"LOAD {next_load_num} TITLE WIND LOAD (BASIC SPEED = {params.basic_wind_speed:.1f} M/S)")
+        next_load_num += 1
+
+    lines.append(f"LOAD {next_load_num} TITLE SEISMIC LOAD (ZONE = {params.seismic_zone})")
+    next_load_num += 1
 
     # Combinations
     lines.append("LOAD COMB 101 1.5(DL + RLL + CL)")

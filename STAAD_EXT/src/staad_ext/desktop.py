@@ -831,6 +831,11 @@ class StaadExtApplication:
         self.fg_right_support = tk.StringVar(value="Fixed")
         self.fg_int_support = tk.StringVar(value="Fixed")
         self.fg_basic_wind_speed = tk.StringVar(value="39.0")
+        self.fg_wind_standard = tk.StringVar(value="IS 875 Part 3")
+        self.fg_wind_building_length = tk.StringVar(value="30.0")
+        self.fg_wind_design_life = tk.StringVar(value="50")
+        self.fg_wind_terrain_category = tk.StringVar(value="2")
+        self.fg_wind_opening = tk.StringVar(value="<5%")
         self.fg_seismic_zone = tk.StringVar(value="Zone III (0.16)")
         self.fg_dead_load = tk.StringVar(value="0.15")
         self.fg_roof_live_load = tk.StringVar(value="0.75")
@@ -889,7 +894,6 @@ class StaadExtApplication:
 
         self._section_header(form_frame, "LOADS & ENVIRONMENT", row)
         row += 1
-        row = self._form_row(form_frame, "Wind Speed (m/s):", self.fg_basic_wind_speed, row)
         row = self._form_choice_row(
             form_frame, "Seismic Zone:", self.fg_seismic_zone,
             ["Zone II (0.10)", "Zone III (0.16)", "Zone IV (0.24)", "Zone V (0.36)"], row
@@ -899,6 +903,48 @@ class StaadExtApplication:
         row = self._form_row(form_frame, "Collateral Load (kN/m²):", self.fg_collateral_load, row)
         row = self._form_row(form_frame, "Mezzanine Live (kN/m²):", self.fg_mezzanine_live_load, row)
         row = self._form_row(form_frame, "Mezzanine Dead (kN/m²):", self.fg_mezzanine_dead_load, row)
+
+        self._section_header(form_frame, "WIND LOAD", row)
+        row += 1
+        row = self._form_choice_row(
+            form_frame, "Wind Code:", self.fg_wind_standard,
+            ["IS 875 Part 3", "MBMA 12"], row
+        )
+        self.fg_wind_frame = tk.Frame(form_frame, bg=self.PANEL)
+        self.fg_wind_frame.grid(row=row, column=0, columnspan=2, sticky="ew")
+        row += 1
+        wrow = 0
+        wrow = self._form_row(self.fg_wind_frame, "Length (m):", self.fg_wind_building_length, wrow)
+        wrow = self._form_choice_row(
+            self.fg_wind_frame, "Basic Wind Speed (m/s):", self.fg_basic_wind_speed,
+            ["33.0", "39.0", "44.0", "47.0", "50.0", "55.0"], wrow
+        )
+        wrow = self._form_choice_row(
+            self.fg_wind_frame, "Design Life (years):", self.fg_wind_design_life,
+            ["5", "25", "50", "100"], wrow
+        )
+        wrow = self._form_choice_row(
+            self.fg_wind_frame, "Terrain Category:", self.fg_wind_terrain_category,
+            ["1", "2", "3", "4"], wrow
+        )
+        wrow = self._form_choice_row(
+            self.fg_wind_frame, "Openings:", self.fg_wind_opening,
+            ["<5%", "5-20%", ">20%"], wrow
+        )
+        tk.Label(
+            self.fg_wind_frame,
+            text="Width, height, roof slope, and bay spacing are taken from Frame Geometry above.",
+            bg=self.PANEL, fg=self.MUTED, font=("Segoe UI", 8), wraplength=280, justify="left",
+        ).grid(row=wrow, column=0, columnspan=2, sticky="w", pady=(4, 0))
+
+        def _sync_wind_frame(*_args: object) -> None:
+            if self.fg_wind_standard.get() == "IS 875 Part 3":
+                self.fg_wind_frame.grid()
+            else:
+                self.fg_wind_frame.grid_remove()
+
+        self.fg_wind_standard.trace_add("write", _sync_wind_frame)
+        _sync_wind_frame()
 
         self._section_header(form_frame, "DESIGN CODE", row)
         row += 1
@@ -991,6 +1037,11 @@ class StaadExtApplication:
             right_support=self.fg_right_support.get(),
             int_support=self.fg_int_support.get(),
             basic_wind_speed=float(self.fg_basic_wind_speed.get().strip() or "39"),
+            wind_standard=self.fg_wind_standard.get(),
+            wind_building_length=float(self.fg_wind_building_length.get().strip() or "30"),
+            wind_design_life=int(self.fg_wind_design_life.get().strip() or "50"),
+            wind_terrain_category=int(self.fg_wind_terrain_category.get().strip() or "2"),
+            wind_opening=self.fg_wind_opening.get(),
             seismic_zone=self.fg_seismic_zone.get(),
             dead_load=float(self.fg_dead_load.get().strip() or "0"),
             roof_live_load=float(self.fg_roof_live_load.get().strip() or "0"),

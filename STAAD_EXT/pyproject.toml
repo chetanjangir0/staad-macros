@@ -25,3 +25,6 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.setuptools.package-data]
+staad_ext = ["wind_profiles/*.xlsx", "wind_profiles/*.yaml"]
