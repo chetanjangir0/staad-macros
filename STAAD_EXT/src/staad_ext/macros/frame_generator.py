@@ -426,7 +426,7 @@ def generate_std_file_content(params: FrameParameters) -> str:
     # Roof live load makes no contribution. Mezzanine live load contributes
     # only a fraction per IS 1893:2016 (25% up to and including 3 kN/m^2,
     # 50% above 3 kN/m^2).
-    lines.append("SELFWEIGHT 1")
+    lines.append("SELFWEIGHT 1.1")
     lines.append("MEMBER WEIGHT")
     if rafter_str:
         lines.append(f"{rafter_str} UNI {w_dl:.3f} 0 0")
@@ -453,7 +453,7 @@ def generate_std_file_content(params: FrameParameters) -> str:
 
     lines.append(f"LOAD {dl_num} LOADTYPE Dead  TITLE DL")
     lines.append("*** Structure Selfweight")
-    lines.append("SELFWEIGHT Y -1")
+    lines.append("SELFWEIGHT Y -1.1")
     lines.append("MEMBER LOAD")
     if rafter_str:
         lines.append("*** Roof Dead Load Calculation:")
