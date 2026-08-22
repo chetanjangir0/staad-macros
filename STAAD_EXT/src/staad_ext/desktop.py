@@ -837,6 +837,9 @@ class StaadExtApplication:
         self.fg_wind_terrain_category = tk.StringVar(value="2")
         self.fg_wind_opening = tk.StringVar(value="<5%")
         self.fg_seismic_zone = tk.StringVar(value="Zone III (0.16)")
+        self.fg_response_reduction_factor = tk.StringVar(value="5")
+        self.fg_importance_factor = tk.StringVar(value="1")
+        self.fg_soil_type = tk.StringVar(value="Medium")
         self.fg_dead_load = tk.StringVar(value="0.15")
         self.fg_roof_live_load = tk.StringVar(value="0.75")
         self.fg_collateral_load = tk.StringVar(value="0.10")
@@ -850,7 +853,8 @@ class StaadExtApplication:
             self.fg_mezzanine_enabled, self.fg_mezzanine_height, self.fg_mezzanine_start_x,
             self.fg_mezzanine_end_x, self.fg_bay_spacing, self.fg_left_support,
             self.fg_right_support, self.fg_int_support, self.fg_basic_wind_speed,
-            self.fg_seismic_zone, self.fg_dead_load, self.fg_roof_live_load,
+            self.fg_seismic_zone, self.fg_response_reduction_factor, self.fg_importance_factor,
+            self.fg_soil_type, self.fg_dead_load, self.fg_roof_live_load,
             self.fg_collateral_load, self.fg_mezzanine_live_load, self.fg_mezzanine_dead_load,
             self.fg_design_code
         ]
@@ -897,6 +901,12 @@ class StaadExtApplication:
         row = self._form_choice_row(
             form_frame, "Seismic Zone:", self.fg_seismic_zone,
             ["Zone II (0.10)", "Zone III (0.16)", "Zone IV (0.24)", "Zone V (0.36)"], row
+        )
+        row = self._form_row(form_frame, "Response Reduction Factor (RF):", self.fg_response_reduction_factor, row)
+        row = self._form_row(form_frame, "Importance Factor (I):", self.fg_importance_factor, row)
+        row = self._form_choice_row(
+            form_frame, "Soil Type:", self.fg_soil_type,
+            ["Hard", "Medium", "Soft"], row
         )
         row = self._form_row(form_frame, "Dead Load (kN/m²):", self.fg_dead_load, row)
         row = self._form_row(form_frame, "Roof Live Load (kN/m²):", self.fg_roof_live_load, row)
@@ -1043,6 +1053,9 @@ class StaadExtApplication:
             wind_terrain_category=int(self.fg_wind_terrain_category.get().strip() or "2"),
             wind_opening=self.fg_wind_opening.get(),
             seismic_zone=self.fg_seismic_zone.get(),
+            response_reduction_factor=float(self.fg_response_reduction_factor.get().strip() or "5"),
+            importance_factor=float(self.fg_importance_factor.get().strip() or "1"),
+            soil_type=self.fg_soil_type.get(),
             dead_load=float(self.fg_dead_load.get().strip() or "0"),
             roof_live_load=float(self.fg_roof_live_load.get().strip() or "0"),
             collateral_load=float(self.fg_collateral_load.get().strip() or "0"),

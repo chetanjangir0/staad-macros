@@ -3,7 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 import math
+import re
 from typing import Any
+
+_SOIL_TYPE_CODES = {"Hard": 1, "Medium": 2, "Soft": 3}
+
+
+def seismic_zone_factor(seismic_zone: str) -> float:
+    """Extract the numeric zone factor Z from a label like 'Zone III (0.16)'."""
+    match = re.search(r"\(([\d.]+)\)", seismic_zone)
+    return float(match.group(1)) if match else 0.16
 
 
 @dataclass
@@ -33,6 +42,9 @@ class FrameParameters:
     wind_terrain_category: int = 2
     wind_opening: str = "<5%"  # "<5%", "5-20%", ">20%"
     seismic_zone: str = "Zone III (0.16)"
+    response_reduction_factor: float = 5.0
+    importance_factor: float = 1.0
+    soil_type: str = "Medium"  # "Hard", "Medium", "Soft"
     dead_load: float = 0.15  # kN/m2
     roof_live_load: float = 0.75  # kN/m2
     collateral_load: float = 0.10  # kN/m2
@@ -61,6 +73,10 @@ class FrameParameters:
             raise ValueError("Bay spacing must be greater than 0.")
         if self.wind_standard == "IS 875 Part 3" and self.wind_building_length <= 0:
             raise ValueError("Wind load building length must be greater than 0.")
+        if self.response_reduction_factor <= 0:
+            raise ValueError("Response reduction factor (RF) must be greater than 0.")
+        if self.importance_factor <= 0:
+            raise ValueError("Importance factor (I) must be greater than 0.")
         if self.mezzanine_enabled:
             if self.mezzanine_height <= 0 or self.mezzanine_height >= self.eave_height:
                 raise ValueError(
@@ -393,7 +409,31 @@ def generate_std_file_content(params: FrameParameters) -> str:
     rafter_str = " ".join(str(bid) for bid in geom.rafter_beams)
     mezz_str = " ".join(str(bid) for bid in geom.mezzanine_beams) if geom.mezzanine_beams else ""
 
-    lines.append("LOAD 1 TITLE DEAD LOAD")
+    # IS 1893 (Part 1) seismic definition and the four static-equivalent
+    # seismic load cases (EL1-EL4). Each case is run through its own
+    # PERFORM ANALYSIS / CHANGE before the remaining static loads are
+    # defined, per the required IS 1893 STAAD input sequence.
+    zone_factor = seismic_zone_factor(params.seismic_zone)
+    soil_code = _SOIL_TYPE_CODES.get(params.soil_type, 2)
+    lines.append("DEFINE 1893 LOAD")
+    lines.append(
+        f"ZONE {zone_factor:g} RF {params.response_reduction_factor:g} "
+        f"I {params.importance_factor:g} SS {soil_code} ST 3"
+    )
+
+    seismic_cases = [("X", 1, "EL1"), ("X", -1, "EL2"), ("Z", 1, "EL3"), ("Z", -1, "EL4")]
+    for case_num, (direction, sign, title) in enumerate(seismic_cases, start=1):
+        lines.append(f"LOAD {case_num} LOADTYPE Seismic-H  TITLE {title}")
+        lines.append(f"1893 LOAD {direction} {sign}")
+        lines.append("PERFORM ANALYSIS")
+        lines.append("CHANGE")
+
+    dl_num = 5
+    rl_num = 6
+    cl_num = 7
+    next_load_num = 8
+
+    lines.append(f"LOAD {dl_num} LOADTYPE Dead  TITLE DL")
     lines.append("*** Structure Selfweight")
     lines.append("SELFWEIGHT Y -1")
     lines.append("MEMBER LOAD")
@@ -406,23 +446,24 @@ def generate_std_file_content(params: FrameParameters) -> str:
         lines.append(f"*** {params.mezzanine_dead_load:.2f} kN/m^2 x {params.bay_spacing:.2f} m (bay spacing) = {w_mdl:.3f} kN/m")
         lines.append(f"{mezz_str} UNI GY -{w_mdl:.3f}")
 
-    lines.append("LOAD 2 TITLE ROOF LIVE LOAD")
+    lines.append(f"LOAD {rl_num} LOADTYPE Roof Live  TITLE RL")
     if rafter_str:
         lines.append("MEMBER LOAD")
         lines.append("*** Roof Live Load Calculation:")
         lines.append(f"*** {params.roof_live_load:.2f} kN/m^2 x {params.bay_spacing:.2f} m (bay spacing) = {w_rll:.3f} kN/m")
         lines.append(f"{rafter_str} UNI GY -{w_rll:.3f}")
 
-    lines.append("LOAD 3 TITLE COLLATERAL LOAD")
+    lines.append(f"LOAD {cl_num} LOADTYPE Dead  TITLE CL")
     if rafter_str:
         lines.append("MEMBER LOAD")
         lines.append("*** Collateral Load Calculation:")
         lines.append(f"*** {params.collateral_load:.2f} kN/m^2 x {params.bay_spacing:.2f} m (bay spacing) = {w_cl:.3f} kN/m")
         lines.append(f"{rafter_str} UNI GY -{w_cl:.3f}")
 
-    next_load_num = 4
+    mezz_num = None
     if params.mezzanine_enabled and mezz_str and w_mll > 0:
-        lines.append(f"LOAD {next_load_num} TITLE MEZZANINE LIVE LOAD")
+        mezz_num = next_load_num
+        lines.append(f"LOAD {mezz_num} TITLE MEZZANINE LIVE LOAD")
         lines.append("MEMBER LOAD")
         lines.append("*** Mezzanine Live Load Calculation:")
         lines.append(f"*** {params.mezzanine_live_load:.2f} kN/m^2 x {params.bay_spacing:.2f} m (bay spacing) = {w_mll:.3f} kN/m")
@@ -456,21 +497,18 @@ def generate_std_file_content(params: FrameParameters) -> str:
         lines.append(f"LOAD {next_load_num} TITLE WIND LOAD (BASIC SPEED = {params.basic_wind_speed:.1f} M/S)")
         next_load_num += 1
 
-    lines.append(f"LOAD {next_load_num} TITLE SEISMIC LOAD (ZONE = {params.seismic_zone})")
-    next_load_num += 1
-
     # Combinations
     lines.append("LOAD COMB 101 1.5(DL + RLL + CL)")
-    if params.mezzanine_enabled and mezz_str:
-        lines.append(" 1 1.5 2 1.5 3 1.5 4 1.5")
+    if mezz_num is not None:
+        lines.append(f" {dl_num} 1.5 {rl_num} 1.5 {cl_num} 1.5 {mezz_num} 1.5")
     else:
-        lines.append(" 1 1.5 2 1.5 3 1.5")
+        lines.append(f" {dl_num} 1.5 {rl_num} 1.5 {cl_num} 1.5")
 
     lines.append("LOAD COMB 102 1.0(DL + RLL + CL) SERVICE")
-    if params.mezzanine_enabled and mezz_str:
-        lines.append(" 1 1.0 2 1.0 3 1.0 4 1.0")
+    if mezz_num is not None:
+        lines.append(f" {dl_num} 1.0 {rl_num} 1.0 {cl_num} 1.0 {mezz_num} 1.0")
     else:
-        lines.append(" 1 1.0 2 1.0 3 1.0")
+        lines.append(f" {dl_num} 1.0 {rl_num} 1.0 {cl_num} 1.0")
 
     lines.append("PERFORM ANALYSIS")
 

@@ -92,7 +92,11 @@ def test_generate_std_file_content():
     assert "*** Roof Dead Load Calculation:" in std_text
     assert "JOINT COORDINATES" in std_text
     assert "MEMBER INCIDENCES" in std_text
-    assert "LOAD 1 TITLE DEAD LOAD" in std_text
+    assert "LOAD 1 LOADTYPE Seismic-H  TITLE EL1" in std_text
+    assert "1893 LOAD X 1" in std_text
+    assert "LOAD 5 LOADTYPE Dead  TITLE DL" in std_text
+    assert "LOAD 6 LOADTYPE Roof Live  TITLE RL" in std_text
+    assert "LOAD 7 LOADTYPE Dead  TITLE CL" in std_text
     assert "CODE INDIAN" in std_text
     # Check converted line load: 0.2 * 6.0 = 1.2 kN/m
     assert "1.200" in std_text
