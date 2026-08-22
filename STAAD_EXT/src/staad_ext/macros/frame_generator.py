@@ -421,6 +421,24 @@ def generate_std_file_content(params: FrameParameters) -> str:
         f"I {params.importance_factor:g} SS {soil_code} ST 3"
     )
 
+    # Seismic weight: structure selfweight plus the same dead/collateral
+    # loads used in the DL/CL static cases, applied to the same members.
+    # Roof live load makes no contribution. Mezzanine live load contributes
+    # only a fraction per IS 1893:2016 (25% up to and including 3 kN/m^2,
+    # 50% above 3 kN/m^2).
+    lines.append("SELFWEIGHT 1")
+    lines.append("MEMBER WEIGHT")
+    if rafter_str:
+        lines.append(f"{rafter_str} UNI {w_dl:.3f} 0 0")
+        if w_cl > 0:
+            lines.append(f"{rafter_str} UNI {w_cl:.3f} 0 0")
+    if mezz_str:
+        if w_mdl > 0:
+            lines.append(f"{mezz_str} UNI {w_mdl:.3f} 0 0")
+        if w_mll > 0:
+            mll_fraction = 0.25 if params.mezzanine_live_load <= 3.0 else 0.5
+            lines.append(f"{mezz_str} UNI {w_mll * mll_fraction:.3f} 0 0")
+
     seismic_cases = [("X", 1, "EL1"), ("X", -1, "EL2"), ("Z", 1, "EL3"), ("Z", -1, "EL4")]
     for case_num, (direction, sign, title) in enumerate(seismic_cases, start=1):
         lines.append(f"LOAD {case_num} LOADTYPE Seismic-H  TITLE {title}")
