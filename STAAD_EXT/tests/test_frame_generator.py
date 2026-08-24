@@ -108,6 +108,33 @@ def test_generate_std_file_content():
     assert "1.200" in std_text
 
 
+def test_generate_std_file_is875_wind_load_comment_block():
+    params = FrameParameters(
+        width=45.7,
+        eave_height=12.0,
+        ridge_distance=20.0,
+        slope=12.0,
+        bay_spacing=7.6,
+        wind_standard="IS 875 Part 3",
+        wind_building_length=146.8,
+        basic_wind_speed=39.0,
+        wind_terrain_category=2,
+        wind_opening="<5%",
+    )
+    std_text = generate_std_file_content(params)
+    assert "************** START IS 875 PART 3 2015 WIND LOAD ******************" in std_text
+    assert "** Vb = 39" in std_text
+    assert "** Slope = 1:12" in std_text
+    assert "** W x L = 45.7 x 146.8" in std_text
+    assert "** Eave height = 12m" in std_text
+    assert "** SW Bay spacing = 7.6m" in std_text
+    assert "** Opening cond. = <5%" in std_text
+    assert "** Terrain category = 2" in std_text
+    assert "**********************************************************" in std_text
+    # Comment block must precede the actual wind load cases
+    assert std_text.index("START IS 875 PART 3") < std_text.index("WIND PRESSURE LEFT TO RIGHT")
+
+
 def test_wind_load_member_groups_excludes_brick_wall_segment():
     params = FrameParameters(
         width=20.0,

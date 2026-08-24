@@ -621,6 +621,16 @@ def generate_std_file_content(params: FrameParameters) -> str:
     if params.wind_standard == "IS 875 Part 3":
         from staad_ext.macros.wind_load import Is875WindParameters, generate_is875_wind_load_lines
 
+        lines.append("************** START IS 875 PART 3 2015 WIND LOAD ******************")
+        lines.append(f"** Vb = {params.basic_wind_speed:g}")
+        lines.append(f"** Slope = 1:{params.slope:g}")
+        lines.append(f"** W x L = {params.width:g} x {params.wind_building_length:g}")
+        lines.append(f"** Eave height = {params.eave_height:g}m")
+        lines.append(f"** SW Bay spacing = {params.bay_spacing:g}m")
+        lines.append(f"** Opening cond. = {params.wind_opening}")
+        lines.append(f"** Terrain category = {params.wind_terrain_category}")
+        lines.append("**********************************************************")
+
         left_col, left_raf, right_raf, right_col = wind_load_member_groups(geom, params)
         wind_params = Is875WindParameters(
             building_length=params.wind_building_length,
