@@ -110,8 +110,8 @@ class StaadExtApplication:
     SUCCESS = "#34d399"
     WARNING = "#fbbf24"
     ERROR = "#fb7185"
-    SUPPORT = "#f43f5e"
-    SUPPORT_HOVER = "#e11d48"
+    SUPPORT = "#1e293b"
+    SUPPORT_HOVER = "#263550"
 
     SUPPORT_URL = "https://razorpay.me/@jangirchetan"
 
