@@ -8,6 +8,14 @@ from typing import Any, Iterable
 
 LOAD_CATEGORIES = ("DL", "LL", "RLL", "CL", "WL", "EQ", "CRANE", "TEMP", "SKIP")
 
+# Categories a designer normally wants expanded into one combination per
+# primary case (wind +X and wind -X must never act at the same time), used
+# when the caller does not specify its own per-category selection.
+DEFAULT_SEPARATE_CATEGORIES = ("WL", "EQ", "CRANE")
+
+# Categories that can be assigned a per-case aggregate/separate mode.
+COMBINABLE_CATEGORIES = tuple(c for c in LOAD_CATEGORIES if c != "SKIP")
+
 
 @dataclass
 class PrimaryLoadCase:
@@ -210,8 +218,21 @@ def generate_combinations(
     aggregate_same_type: bool = False,
     start_uls: int = 101,
     start_sls: int = 201,
+    separate_cats: Iterable[str] | None = None,
 ) -> list[GeneratedCombo]:
-    """Generate list of combination objects based on assigned primary cases and rules."""
+    """Generate list of combination objects based on assigned primary cases and rules.
+
+    ``separate_cats`` names the categories whose primary cases are expanded
+    into one combination each (a cartesian product across those categories);
+    every other category has its cases summed into a single combination.
+    When it is None the mode is derived from ``aggregate_same_type`` so older
+    callers keep the previous all-or-lateral-only behaviour.
+    """
+    if separate_cats is None:
+        expand = set() if aggregate_same_type else set(DEFAULT_SEPARATE_CATEGORIES)
+    else:
+        expand = set(separate_cats)
+
     # Filter active non-skip cases
     active_cases = [c for c in primary_cases if c.category != "SKIP"]
 
@@ -228,10 +249,10 @@ def generate_combinations(
         # Check which required categories exist in active_cases
         req_cats = [cat for cat, factor in rule.factors.items() if factor != 0]
 
-        # Determine lateral / variable categories in this rule (WL, EQ, CRANE)
-        lateral_cats = [cat for cat in req_cats if cat in ("WL", "EQ", "CRANE")]
+        # Categories in this rule the caller asked to expand case-by-case.
+        lateral_cats = [cat for cat in req_cats if cat in expand]
 
-        if aggregate_same_type or not lateral_cats:
+        if not lateral_cats:
             # Aggregate mode: combine all primary cases of each category together
             factors_list: list[tuple[int, float]] = []
             title_parts: list[str] = []
@@ -278,7 +299,7 @@ def generate_combinations(
                 # No lateral cases found for this rule, treat standard non-lateral part
                 factors_list = []
                 for cat, rule_factor in rule.factors.items():
-                    if cat not in ("WL", "EQ", "CRANE") and cat in by_cat:
+                    if cat not in expand and cat in by_cat:
                         for plc in by_cat[cat]:
                             factors_list.append((plc.id, rule_factor))
 
@@ -307,7 +328,7 @@ def generate_combinations(
 
                     # Non-lateral loads
                     for cat, rule_factor in rule.factors.items():
-                        if cat not in ("WL", "EQ", "CRANE") and cat in by_cat:
+                        if cat not in expand and cat in by_cat:
                             for plc in by_cat[cat]:
                                 factors_list.append((plc.id, rule_factor))
 

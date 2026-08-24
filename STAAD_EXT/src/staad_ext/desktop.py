@@ -14,6 +14,8 @@ from staad_ext.macros.frame_generator import (
     generate_std_file_content,
 )
 from staad_ext.macros.load_combinations import (
+    COMBINABLE_CATEGORIES,
+    DEFAULT_SEPARATE_CATEGORIES,
     LOAD_CATEGORIES,
     CombinationPreset,
     ComboRule,
@@ -509,12 +511,15 @@ class StaadExtApplication:
         )
 
     def _dark_check(
-        self, parent: tk.Widget, text: str, variable: tk.BooleanVar
+        self, parent: tk.Widget, text: str, variable: tk.BooleanVar,
+        bg: str | None = None,
     ) -> tk.Checkbutton:
+        back = bg or self.PANEL
         return tk.Checkbutton(
-            parent, text=text, variable=variable, bg=self.PANEL, fg=self.TEXT,
-            activebackground=self.PANEL, activeforeground=self.TEXT,
-            selectcolor=self.PANEL_ALT, font=("Segoe UI", 9),
+            parent, text=text, variable=variable, bg=back, fg=self.TEXT,
+            activebackground=back, activeforeground=self.TEXT,
+            selectcolor=self.PANEL_ALT if back != self.PANEL_ALT else self.PANEL,
+            font=("Segoe UI", 9),
         )
 
     def _dark_radio(
@@ -1325,12 +1330,6 @@ class StaadExtApplication:
         opt_frame = tk.Frame(controls_panel, bg=self.PANEL)
         opt_frame.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(10, 0))
 
-        self.lc_aggregate_var = tk.BooleanVar(value=False)
-        self._dark_check(
-            opt_frame, "Aggregate load cases of same category (e.g. DL1 + DL2 together)", self.lc_aggregate_var
-        ).pack(side="left", padx=(0, 25))
-        self.lc_aggregate_var.trace_add("write", lambda *_: self._recalculate_combinations())
-
         tk.Label(opt_frame, text="Start ULS #:", bg=self.PANEL, fg=self.MUTED, font=("Segoe UI", 9)).pack(side="left")
         self.lc_start_uls = tk.StringVar(value="101")
         e_uls = self._dark_entry(opt_frame, self.lc_start_uls, width=6)
@@ -1342,6 +1341,8 @@ class StaadExtApplication:
         e_sls = self._dark_entry(opt_frame, self.lc_start_sls, width=6)
         e_sls.pack(side="left", padx=(5, 0))
         e_sls.bind("<KeyRelease>", lambda _e: self._recalculate_combinations())
+
+        self._build_lc_category_mode_row(controls_panel)
 
         paned = tk.PanedWindow(self.content, orient="vertical", bg=self.BG, sashwidth=7, sashrelief="flat", bd=0)
         paned.pack(fill="both", expand=True)
@@ -1481,6 +1482,57 @@ class StaadExtApplication:
         name = self.lc_preset_name.get()
         return next((p for p in self.lc_presets_list if p.name == name), self.lc_presets_list[0])
 
+    def _build_lc_category_mode_row(self, parent: tk.Widget) -> None:
+        """Per-category aggregate/separate toggles for the load combination view."""
+        mode_frame = tk.Frame(parent, bg=self.PANEL_ALT)
+        mode_frame.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(12, 0))
+
+        header = tk.Frame(mode_frame, bg=self.PANEL_ALT)
+        header.pack(fill="x", padx=12, pady=(10, 2))
+        tk.Label(
+            header, text="CATEGORY MODE", bg=self.PANEL_ALT, fg=self.MUTED,
+            font=("Segoe UI", 8, "bold"),
+        ).pack(side="left")
+        tk.Label(
+            header,
+            text="ticked = separate (one combo per case)  ·  unticked = aggregate (cases summed)",
+            bg=self.PANEL_ALT, fg="#64748b", font=("Segoe UI", 8),
+        ).pack(side="left", padx=(10, 0))
+
+        self._lc_small_button(header, "All Separate", lambda: self._set_all_lc_modes(True)).pack(
+            side="right"
+        )
+        self._lc_small_button(header, "All Aggregate", lambda: self._set_all_lc_modes(False)).pack(
+            side="right", padx=(0, 6)
+        )
+
+        checks = tk.Frame(mode_frame, bg=self.PANEL_ALT)
+        checks.pack(fill="x", padx=8, pady=(0, 10))
+
+        self.lc_separate_vars: dict[str, tk.BooleanVar] = {}
+        for cat in COMBINABLE_CATEGORIES:
+            var = tk.BooleanVar(value=cat in DEFAULT_SEPARATE_CATEGORIES)
+            var.trace_add("write", lambda *_: self._recalculate_combinations())
+            self.lc_separate_vars[cat] = var
+            self._dark_check(checks, cat, var, bg=self.PANEL_ALT).pack(side="left", padx=(0, 6))
+
+    def _lc_small_button(
+        self, parent: tk.Widget, text: str, command: Callable[[], None]
+    ) -> tk.Button:
+        return tk.Button(
+            parent, text=text, command=command, bg=self.PANEL, fg=self.TEXT,
+            activebackground=self.BORDER, activeforeground=self.TEXT,
+            relief="flat", bd=0, padx=10, pady=3,
+            font=("Segoe UI", 8), cursor="hand2",
+        )
+
+    def _set_all_lc_modes(self, separate: bool) -> None:
+        for var in self.lc_separate_vars.values():
+            var.set(separate)
+
+    def _selected_separate_cats(self) -> set[str]:
+        return {cat for cat, var in self.lc_separate_vars.items() if var.get()}
+
     def _recalculate_combinations(self) -> None:
         if not hasattr(self, "lc_combo_table"):
             return
@@ -1494,7 +1546,7 @@ class StaadExtApplication:
         combos = generate_combinations(
             primary_cases=self.primary_cases_data,
             preset=preset,
-            aggregate_same_type=self.lc_aggregate_var.get(),
+            separate_cats=self._selected_separate_cats(),
             start_uls=uls,
             start_sls=sls,
         )
