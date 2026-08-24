@@ -317,6 +317,10 @@ def wind_load_member_groups(
     Assumes the standard single-span gable case the workbook is built for:
     one column line at x=0, one at x=width, and rafter segments split at the
     ridge. Any interior columns/mezzanine beams are not part of the wind path.
+
+    A brick wall segment (base up to brick_wall_height) is excluded from the
+    column wind path -- the wall itself carries that portion of the wind
+    pressure, not the sheeted column above it.
     """
     node_map = {n.id: n for n in geom.nodes}
 
@@ -327,6 +331,7 @@ def wind_load_member_groups(
             if m.group_type == "outer_column"
             and abs(node_map[m.start_node].x - x_target) < 1e-4
             and abs(node_map[m.end_node].x - x_target) < 1e-4
+            and max(node_map[m.start_node].y, node_map[m.end_node].y) > params.brick_wall_height + 1e-4
         ]
         return sorted(ids, key=lambda mid: node_map[next(m for m in geom.members if m.id == mid).start_node].y)
 

@@ -5,6 +5,7 @@ from staad_ext.macros.frame_generator import (
     generate_std_file_content,
     rafter_y,
     parse_interior_columns,
+    wind_load_member_groups,
 )
 
 
@@ -105,6 +106,41 @@ def test_generate_std_file_content():
     assert "BEAM 1 ALL" in std_text
     # Check converted line load: 0.2 * 6.0 = 1.2 kN/m
     assert "1.200" in std_text
+
+
+def test_wind_load_member_groups_excludes_brick_wall_segment():
+    params = FrameParameters(
+        width=20.0,
+        eave_height=7.0,
+        ridge_distance=9.0,
+        slope=5.0,
+        bay_spacing=6.0,
+        brick_wall_height=1.5,
+    )
+    geom = compute_frame_geometry(params)
+    left_col, _, _, right_col = wind_load_member_groups(geom, params)
+    # Member 1 (base -> brick wall) and member 3 (base -> brick wall on the
+    # right) must not receive wind load; only the sheeted segments above
+    # the wall (members 2 and 4) do.
+    assert 1 not in left_col
+    assert 3 not in right_col
+    assert left_col == [2]
+    assert right_col == [4]
+
+
+def test_wind_load_member_groups_no_brick_wall_includes_full_column():
+    params = FrameParameters(
+        width=20.0,
+        eave_height=7.0,
+        ridge_distance=9.0,
+        slope=5.0,
+        bay_spacing=6.0,
+        brick_wall_height=0.0,
+    )
+    geom = compute_frame_geometry(params)
+    left_col, _, _, right_col = wind_load_member_groups(geom, params)
+    assert left_col == [1]
+    assert right_col == [2]
 
 
 def test_generate_std_file_column_rafter_parameters_clear_span():
