@@ -352,7 +352,7 @@ def format_staad_combo_text(combos: list[GeneratedCombo]) -> str:
 def fetch_primary_cases_from_openstaad(staad: Any) -> list[PrimaryLoadCase]:
     """Fetch primary load case IDs and titles from active STAAD model."""
     from comtypes.safearray import _midlSAFEARRAY
-    from ctypes import c_long
+    from ctypes import byref, c_long
 
     try:
         count = int(staad.load.GetPrimaryLoadCaseCount())
@@ -363,7 +363,7 @@ def fetch_primary_cases_from_openstaad(staad: Any) -> list[PrimaryLoadCase]:
         return []
 
     numbers = _midlSAFEARRAY(c_long).create([0] * count)
-    staad.load.GetPrimaryLoadCaseNumbers(numbers)
+    staad.load.GetPrimaryLoadCaseNumbers(byref(numbers))
 
     cases: list[PrimaryLoadCase] = []
     for nid in numbers.unpack():

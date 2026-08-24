@@ -59,7 +59,9 @@ class OpenStaad:
         )
         _flag_methods(
             self.load,
-            ("GetLoadCombinationCaseCount", "GetLoadCombinationCaseNumbers"),
+            ("GetLoadCombinationCaseCount", "GetLoadCombinationCaseNumbers",
+             "GetPrimaryLoadCaseCount", "GetPrimaryLoadCaseNumbers",
+             "GetLoadCaseTitle", "GetLoadType"),
         )
 
     @classmethod
