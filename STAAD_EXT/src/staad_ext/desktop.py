@@ -998,6 +998,9 @@ class StaadExtApplication:
             side="left", padx=(0, 10)
         )
         self._secondary_button(action_frame, "Save .STD File...", self._save_frame_std_file).pack(
+            side="left", padx=(0, 10)
+        )
+        self._secondary_button(action_frame, "Copy File Contents", self._copy_frame_std_file).pack(
             side="left"
         )
 
@@ -1229,6 +1232,16 @@ class StaadExtApplication:
             if selected:
                 Path(selected).write_text(std_content, encoding="utf-8")
                 self._set_status(f"Saved STAAD file to {selected}", "success")
+        except (OSError, TypeError, ValueError) as exc:
+            self._set_status(str(exc), "error")
+
+    def _copy_frame_std_file(self) -> None:
+        try:
+            params = self._get_frame_params()
+            std_content = generate_std_file_content(params)
+            self.root.clipboard_clear()
+            self.root.clipboard_append(std_content)
+            self._set_status("Copied .STD file contents to clipboard!", "success")
         except (OSError, TypeError, ValueError) as exc:
             self._set_status(str(exc), "error")
 
