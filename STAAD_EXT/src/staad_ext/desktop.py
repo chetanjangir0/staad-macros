@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import tkinter as tk
+import webbrowser
 from tkinter import filedialog, messagebox, ttk
 from typing import Callable
 
@@ -109,6 +110,10 @@ class StaadExtApplication:
     SUCCESS = "#34d399"
     WARNING = "#fbbf24"
     ERROR = "#fb7185"
+    SUPPORT = "#f43f5e"
+    SUPPORT_HOVER = "#e11d48"
+
+    SUPPORT_URL = "https://razorpay.me/@jangirchetan"
 
     def __init__(self) -> None:
         self.root = tk.Tk()
@@ -258,6 +263,33 @@ class StaadExtApplication:
 
         footer = tk.Frame(sidebar, bg=self.SIDEBAR)
         footer.pack(side="bottom", fill="x", padx=20, pady=20)
+
+        support_card = tk.Frame(footer, bg=self.PANEL_ALT)
+        support_card.pack(fill="x", pady=(0, 16))
+        tk.Label(
+            support_card, text="❤  Enjoying this free tool?",
+            bg=self.PANEL_ALT, fg=self.TEXT, font=("Segoe UI", 9, "bold"),
+        ).pack(anchor="w", padx=14, pady=(12, 2))
+        tk.Label(
+            support_card, text="A small tip keeps it maintained.",
+            bg=self.PANEL_ALT, fg=self.MUTED, font=("Segoe UI", 8),
+        ).pack(anchor="w", padx=14, pady=(0, 10))
+        support_button = tk.Button(
+            support_card, text="Support Development",
+            command=self._open_support_link,
+            bg=self.SUPPORT, fg="white",
+            activebackground=self.SUPPORT_HOVER, activeforeground="white",
+            relief="flat", bd=0, cursor="hand2",
+            font=("Segoe UI", 9, "bold"), padx=10, pady=8,
+        )
+        support_button.pack(fill="x", padx=14, pady=(0, 14))
+        support_button.bind(
+            "<Enter>", lambda _e: support_button.configure(bg=self.SUPPORT_HOVER)
+        )
+        support_button.bind(
+            "<Leave>", lambda _e: support_button.configure(bg=self.SUPPORT)
+        )
+
         tk.Frame(footer, bg=self.BORDER, height=1).pack(fill="x", pady=(0, 15))
         tk.Label(
             footer, text="STAAD.Pro 2025", bg=self.SIDEBAR, fg=self.MUTED,
@@ -282,6 +314,9 @@ class StaadExtApplication:
             self.status_bar, textvariable=self._status_text, bg=self.SIDEBAR,
             fg=self.MUTED, font=("Segoe UI", 9),
         ).pack(side="left")
+
+    def _open_support_link(self) -> None:
+        webbrowser.open(self.SUPPORT_URL)
 
     def _add_nav_button(
         self, parent: tk.Widget, key: str, label: str, number: str | None = None
