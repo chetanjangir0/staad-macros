@@ -346,6 +346,86 @@ def wind_load_member_groups(
     return left_column, left_rafter, right_rafter, right_column
 
 
+def unbraced_length_parameter_lines(geom: FrameGeometryData, params: FrameParameters) -> list[str]:
+    """Build the KZ/LX/LY/LZ design-parameter lines for columns and rafters.
+
+    Column KZ follows its own base support (Pinned -> 2, Fixed -> 1.2). LX/LY
+    are the sheeting-braced height (max of brick wall height and 1.5 m) for
+    outer columns, or the full column length for unbraced interior columns.
+    LZ is always the full physical column length (base to top), computed per
+    physical column rather than per STAAD member, since a column may be
+    split into several members at a brick wall or mezzanine node.
+
+    Rafter LX/LY are fixed at 1.5 m (purlin bracing). Rafter LZ is the
+    horizontal span between the unbraced points along the rafter: for a
+    clear span (no interior columns) that's column-to-ridge on each side;
+    otherwise it's column-to-column, ignoring the ridge break.
+    """
+    node_map = {n.id: n for n in geom.nodes}
+    lines: list[str] = []
+
+    # ---- Columns ----
+    col_groups: dict[float, list[Member]] = {}
+    for m in geom.members:
+        if m.group_type in ("outer_column", "interior_column"):
+            x = round(node_map[m.start_node].x, 4)
+            col_groups.setdefault(x, []).append(m)
+
+    if col_groups:
+        lines.append("******** COLUMNS *******")
+        braced_len = max(params.brick_wall_height, 1.5)
+        for x in sorted(col_groups):
+            members_at_x = sorted(col_groups[x], key=lambda mm: mm.id)
+            ys = [node_map[m.start_node].y for m in members_at_x] + [
+                node_map[m.end_node].y for m in members_at_x
+            ]
+            full_len = max(ys) - min(ys)
+            is_outer = abs(x) < 1e-4 or abs(x - params.width) < 1e-4
+            if abs(x) < 1e-4:
+                support = params.left_support
+            elif abs(x - params.width) < 1e-4:
+                support = params.right_support
+            else:
+                support = params.int_support
+            kz = 2 if support == "Pinned" else 1.2
+            lx_ly = braced_len if is_outer else full_len
+            ids_str = " ".join(str(m.id) for m in members_at_x)
+            lines.append(f"KZ {kz:g} MEMB {ids_str}")
+            lines.append(f"LX {lx_ly:g} MEMB {ids_str}")
+            lines.append(f"LY {lx_ly:g} MEMB {ids_str}")
+            lines.append(f"LZ {full_len:g} MEMB {ids_str}")
+
+    # ---- Rafters ----
+    if geom.rafter_beams:
+        lines.append("******** RAFTERS *******")
+        ids_str = " ".join(str(bid) for bid in geom.rafter_beams)
+        lines.append(f"LX 1.5 MEMB {ids_str}")
+        lines.append(f"LY 1.5 MEMB {ids_str}")
+
+        int_x = geom.interior_x_positions
+        if int_x:
+            breakpoints = sorted(set([0.0, params.width] + int_x))
+        else:
+            breakpoints = sorted(set([0.0, params.ridge_distance, params.width]))
+
+        rafter_members = [m for m in geom.members if m.id in geom.rafter_beams]
+        seg_groups: dict[tuple[float, float], list[int]] = {}
+        for m in rafter_members:
+            mid_x = (node_map[m.start_node].x + node_map[m.end_node].x) / 2
+            for i in range(len(breakpoints) - 1):
+                lo, hi = breakpoints[i], breakpoints[i + 1]
+                if lo - 1e-4 <= mid_x <= hi + 1e-4:
+                    seg_groups.setdefault((lo, hi), []).append(m.id)
+                    break
+
+        for (lo, hi), ids in sorted(seg_groups.items()):
+            seg_len = hi - lo
+            seg_ids_str = " ".join(str(i) for i in sorted(ids))
+            lines.append(f"LZ {seg_len:g} MEMB {seg_ids_str}")
+
+    return lines
+
+
 def generate_std_file_content(params: FrameParameters) -> str:
     """Generate complete .STD file text content for STAAD.Pro."""
     geom = compute_frame_geometry(params)
@@ -545,6 +625,8 @@ def generate_std_file_content(params: FrameParameters) -> str:
         lines.append("RATIO 0.99 ALL")
         lines.append("STP 2 ALL")
         lines.append("BEAM 1 ALL")
+
+    lines.extend(unbraced_length_parameter_lines(geom, params))
 
     lines.append("CHECK CODE ALL")
     lines.append("SELECT ALL")

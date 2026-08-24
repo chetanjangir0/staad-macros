@@ -107,6 +107,56 @@ def test_generate_std_file_content():
     assert "1.200" in std_text
 
 
+def test_generate_std_file_column_rafter_parameters_clear_span():
+    params = FrameParameters(
+        width=20.0,
+        eave_height=7.0,
+        ridge_distance=9.0,
+        slope=5.0,
+        bay_spacing=6.0,
+        brick_wall_height=1.2,
+        left_support="Fixed",
+        right_support="Pinned",
+    )
+    std_text = generate_std_file_content(params)
+    assert "******** COLUMNS *******" in std_text
+    assert "******** RAFTERS *******" in std_text
+    # Left column: fixed base -> KZ 1.2, sheeting-braced LX/LY = max(1.2, 1.5) = 1.5
+    assert "KZ 1.2 MEMB 1 2" in std_text
+    assert "LX 1.5 MEMB 1 2" in std_text
+    assert "LY 1.5 MEMB 1 2" in std_text
+    assert "LZ 7 MEMB 1 2" in std_text
+    # Right column: pinned base -> KZ 2
+    assert "KZ 2 MEMB 3 4" in std_text
+    # Clear span: rafter LZ splits at the ridge into 9m and 11m
+    assert "LZ 9 MEMB 5" in std_text
+    assert "LZ 11 MEMB 6" in std_text
+    assert "LX 1.5 MEMB 5 6" in std_text
+    assert "LY 1.5 MEMB 5 6" in std_text
+
+
+def test_generate_std_file_rafter_parameters_with_interior_column():
+    params = FrameParameters(
+        width=20.0,
+        eave_height=7.0,
+        ridge_distance=9.0,
+        slope=5.0,
+        bay_spacing=6.0,
+        col_mode="count",
+        col_input="1",
+        int_support="Pinned",
+    )
+    std_text = generate_std_file_content(params)
+    # Not a clear span: rafter breaks at the interior column (x=10), not the ridge.
+    assert "LZ 10 MEMB 4 5" in std_text
+    assert "LZ 10 MEMB 6" in std_text
+    # Interior column: unbraced LX/LY = full column length (rafter height at x=10)
+    assert "KZ 2 MEMB 3" in std_text
+    assert "LX 8.6 MEMB 3" in std_text
+    assert "LY 8.6 MEMB 3" in std_text
+    assert "LZ 8.6 MEMB 3" in std_text
+
+
 def test_invalid_parameters():
     with pytest.raises(ValueError, match="Brick wall height"):
         FrameParameters(width=20.0, eave_height=7.0, brick_wall_height=8.0).validate()
