@@ -1167,7 +1167,9 @@ class StaadExtApplication:
             bx2, by2 = to_c(params.width, bw_y)
             c.create_line(bx1 - 5, by1, bx1 + 5, by1, fill="#f43f5e", width=2)
             c.create_line(bx2 - 5, by2, bx2 + 5, by2, fill="#f43f5e", width=2)
-            c.create_text(bx1 - 12, by1, text=f"BW {bw_y}m", fill="#f43f5e", font=("Segoe UI", 7), anchor="e")
+            # Anchored inside the frame: to the left there is only the eave
+            # dimension line and then the canvas edge, which clipped the text.
+            c.create_text(bx1 + 10, by1 - 6, text=f"BW {bw_y}m", fill="#f43f5e", font=("Segoe UI", 7), anchor="w")
 
         for n in geom.nodes:
             nx, ny = to_c(n.x, n.y)
@@ -1197,7 +1199,13 @@ class StaadExtApplication:
         dim_x_l = ox - 25
         _, cy_eave = to_c(0, params.eave_height)
         c.create_line(dim_x_l, oy, dim_x_l, cy_eave, fill=self.MUTED, arrow="both", arrowshape=(6, 8, 3))
-        c.create_text(dim_x_l - 6, (oy + cy_eave) / 2, text=f"Eave {params.eave_height:.1f}m", fill=self.TEXT, font=("Segoe UI", 8), anchor="e")
+        # Drawn rotated along the dimension line: horizontal text here needs
+        # ~55px of room but only `margin` px exist, so it was clipped.
+        c.create_text(
+            dim_x_l - 9, (oy + cy_eave) / 2,
+            text=f"Eave {params.eave_height:.1f}m", fill=self.TEXT,
+            font=("Segoe UI", 8), angle=90, anchor="center",
+        )
 
         cx_r, cy_r = to_c(params.ridge_distance, geom.ridge_height)
         c.create_text(cx_r, cy_r - 12, text=f"Ridge {geom.ridge_height:.2f}m", fill="#38bdf8", font=("Segoe UI", 8, "bold"))
