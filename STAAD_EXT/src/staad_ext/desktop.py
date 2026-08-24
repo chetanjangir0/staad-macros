@@ -193,16 +193,17 @@ class StaadExtApplication:
             set_attribute.argtypes = [
                 wintypes.HWND, wintypes.DWORD, c_void_p, wintypes.DWORD
             ]
-            set_attribute.restype = wintypes.HRESULT
+            # ctypes.wintypes has no HRESULT, and ctypes.HRESULT raises on any
+            # failure code. Read the HRESULT as a plain LONG and test it here.
+            set_attribute.restype = wintypes.LONG
             enabled = c_int(1)
             # Attribute 20 is current; 19 supports earlier Windows 10 builds.
             for attribute in (20, 19):
-                result = set_attribute(
+                if set_attribute(
                     hwnd, attribute, byref(enabled), sizeof(enabled)
-                )
-                if result == 0:
-
+                ) == 0:
                     break
+
             def colorref(value: str) -> c_int:
                 red = int(value[1:3], 16)
                 green = int(value[3:5], 16)
