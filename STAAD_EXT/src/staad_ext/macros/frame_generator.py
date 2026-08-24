@@ -539,7 +539,12 @@ def generate_std_file_content(params: FrameParameters) -> str:
         else:
             lines.append("METHOD ASD")
     else:
-        lines.append("CODE INDIAN")
+        lines.append("CODE IS800 LSD")
+        lines.append("FYLD 345000 ALL")
+        lines.append("FU 490000 ALL")
+        lines.append("RATIO 0.99 ALL")
+        lines.append("STP 2 ALL")
+        lines.append("BEAM 1 ALL")
 
     lines.append("CHECK CODE ALL")
     lines.append("SELECT ALL")

@@ -97,7 +97,12 @@ def test_generate_std_file_content():
     assert "LOAD 5 LOADTYPE Dead  TITLE DL" in std_text
     assert "LOAD 6 LOADTYPE Roof Live  TITLE RL" in std_text
     assert "LOAD 7 LOADTYPE Dead  TITLE CL" in std_text
-    assert "CODE INDIAN" in std_text
+    assert "CODE IS800 LSD" in std_text
+    assert "FYLD 345000 ALL" in std_text
+    assert "FU 490000 ALL" in std_text
+    assert "RATIO 0.99 ALL" in std_text
+    assert "STP 2 ALL" in std_text
+    assert "BEAM 1 ALL" in std_text
     # Check converted line load: 0.2 * 6.0 = 1.2 kN/m
     assert "1.200" in std_text
 
