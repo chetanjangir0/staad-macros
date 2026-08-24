@@ -346,6 +346,33 @@ def wind_load_member_groups(
     return left_column, left_rafter, right_rafter, right_column
 
 
+def _format_member_ranges(member_ids: list[int]) -> str:
+    """Format member ids as STAAD list syntax, collapsing runs of 2+
+    consecutive ids into "start TO end" (e.g. [1, 3, 5, 7, 8, 9] -> "1 3 5 7 TO 9")."""
+    ids = sorted(set(member_ids))
+    parts: list[str] = []
+    i = 0
+    while i < len(ids):
+        j = i
+        while j + 1 < len(ids) and ids[j + 1] == ids[j] + 1:
+            j += 1
+        if j > i:
+            parts.append(f"{ids[i]} TO {ids[j]}")
+        else:
+            parts.append(str(ids[i]))
+        i = j + 1
+    return " ".join(parts)
+
+
+def _emit_merged_param_lines(name: str, value_to_ids: dict[float, list[int]]) -> list[str]:
+    """One line per distinct value, merging every member id assigned that
+    value (within this single component block) into one ranged list."""
+    lines = []
+    for value in sorted(value_to_ids):
+        lines.append(f"{name} {value:g} MEMB {_format_member_ranges(value_to_ids[value])}")
+    return lines
+
+
 def unbraced_length_parameter_lines(geom: FrameGeometryData, params: FrameParameters) -> list[str]:
     """Build the KZ/LX/LY/LZ design-parameter lines for columns and rafters.
 
@@ -354,14 +381,21 @@ def unbraced_length_parameter_lines(geom: FrameGeometryData, params: FrameParame
     outer columns, or the full column length for unbraced interior columns.
     LZ is always the full physical column length (base to top), computed per
     physical column rather than per STAAD member, since a column may be
-    split into several members at a brick wall or mezzanine node.
+    split into several members at a brick wall or mezzanine node. Columns
+    that land on the same value are reported on a single merged line.
 
     Rafter LX/LY are fixed at 1.5 m (purlin bracing). Rafter LZ is the
-    horizontal span between the unbraced points along the rafter: for a
-    clear span (no interior columns) that's column-to-ridge on each side;
-    otherwise it's column-to-column, ignoring the ridge break.
+    actual (slope-corrected) length of the rafter between unbraced points:
+    for a clear span (no interior columns) that's column-to-ridge on each
+    side; otherwise it's column-to-column, following the rafter profile
+    rather than the horizontal projection.
     """
     node_map = {n.id: n for n in geom.nodes}
+
+    def member_length(m: Member) -> float:
+        n1, n2 = node_map[m.start_node], node_map[m.end_node]
+        return math.hypot(n2.x - n1.x, n2.y - n1.y)
+
     lines: list[str] = []
 
     # ---- Columns ----
@@ -372,14 +406,18 @@ def unbraced_length_parameter_lines(geom: FrameGeometryData, params: FrameParame
             col_groups.setdefault(x, []).append(m)
 
     if col_groups:
-        lines.append("******** COLUMNS *******")
+        kz_map: dict[float, list[int]] = {}
+        lx_map: dict[float, list[int]] = {}
+        ly_map: dict[float, list[int]] = {}
+        lz_map: dict[float, list[int]] = {}
         braced_len = max(params.brick_wall_height, 1.5)
         for x in sorted(col_groups):
-            members_at_x = sorted(col_groups[x], key=lambda mm: mm.id)
+            members_at_x = col_groups[x]
+            ids = [m.id for m in members_at_x]
             ys = [node_map[m.start_node].y for m in members_at_x] + [
                 node_map[m.end_node].y for m in members_at_x
             ]
-            full_len = max(ys) - min(ys)
+            full_len = round(max(ys) - min(ys), 4)
             is_outer = abs(x) < 1e-4 or abs(x - params.width) < 1e-4
             if abs(x) < 1e-4:
                 support = params.left_support
@@ -389,18 +427,22 @@ def unbraced_length_parameter_lines(geom: FrameGeometryData, params: FrameParame
                 support = params.int_support
             kz = 2 if support == "Pinned" else 1.2
             lx_ly = braced_len if is_outer else full_len
-            ids_str = " ".join(str(m.id) for m in members_at_x)
-            lines.append(f"KZ {kz:g} MEMB {ids_str}")
-            lines.append(f"LX {lx_ly:g} MEMB {ids_str}")
-            lines.append(f"LY {lx_ly:g} MEMB {ids_str}")
-            lines.append(f"LZ {full_len:g} MEMB {ids_str}")
+            kz_map.setdefault(kz, []).extend(ids)
+            lx_map.setdefault(lx_ly, []).extend(ids)
+            ly_map.setdefault(lx_ly, []).extend(ids)
+            lz_map.setdefault(full_len, []).extend(ids)
+
+        lines.append("******** COLUMNS *******")
+        lines.extend(_emit_merged_param_lines("KZ", kz_map))
+        lines.extend(_emit_merged_param_lines("LX", lx_map))
+        lines.extend(_emit_merged_param_lines("LY", ly_map))
+        lines.extend(_emit_merged_param_lines("LZ", lz_map))
 
     # ---- Rafters ----
     if geom.rafter_beams:
         lines.append("******** RAFTERS *******")
-        ids_str = " ".join(str(bid) for bid in geom.rafter_beams)
-        lines.append(f"LX 1.5 MEMB {ids_str}")
-        lines.append(f"LY 1.5 MEMB {ids_str}")
+        lines.append(f"LX 1.5 MEMB {_format_member_ranges(geom.rafter_beams)}")
+        lines.append(f"LY 1.5 MEMB {_format_member_ranges(geom.rafter_beams)}")
 
         int_x = geom.interior_x_positions
         if int_x:
@@ -409,19 +451,22 @@ def unbraced_length_parameter_lines(geom: FrameGeometryData, params: FrameParame
             breakpoints = sorted(set([0.0, params.ridge_distance, params.width]))
 
         rafter_members = [m for m in geom.members if m.id in geom.rafter_beams]
-        seg_groups: dict[tuple[float, float], list[int]] = {}
+        seg_ids: dict[int, list[int]] = {}
         for m in rafter_members:
             mid_x = (node_map[m.start_node].x + node_map[m.end_node].x) / 2
             for i in range(len(breakpoints) - 1):
                 lo, hi = breakpoints[i], breakpoints[i + 1]
                 if lo - 1e-4 <= mid_x <= hi + 1e-4:
-                    seg_groups.setdefault((lo, hi), []).append(m.id)
+                    seg_ids.setdefault(i, []).append(m.id)
                     break
 
-        for (lo, hi), ids in sorted(seg_groups.items()):
-            seg_len = hi - lo
-            seg_ids_str = " ".join(str(i) for i in sorted(ids))
-            lines.append(f"LZ {seg_len:g} MEMB {seg_ids_str}")
+        lz_map: dict[float, list[int]] = {}
+        for seg_i, ids in seg_ids.items():
+            seg_members = [m for m in rafter_members if m.id in ids]
+            seg_len = round(sum(member_length(m) for m in seg_members), 4)
+            lz_map.setdefault(seg_len, []).extend(ids)
+
+        lines.extend(_emit_merged_param_lines("LZ", lz_map))
 
     return lines
 

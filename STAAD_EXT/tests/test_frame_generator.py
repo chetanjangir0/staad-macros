@@ -122,17 +122,21 @@ def test_generate_std_file_column_rafter_parameters_clear_span():
     assert "******** COLUMNS *******" in std_text
     assert "******** RAFTERS *******" in std_text
     # Left column: fixed base -> KZ 1.2, sheeting-braced LX/LY = max(1.2, 1.5) = 1.5
-    assert "KZ 1.2 MEMB 1 2" in std_text
-    assert "LX 1.5 MEMB 1 2" in std_text
-    assert "LY 1.5 MEMB 1 2" in std_text
-    assert "LZ 7 MEMB 1 2" in std_text
+    # (member ids collapsed into "1 TO 2" range notation)
+    assert "KZ 1.2 MEMB 1 TO 2" in std_text
+    assert "LZ 7 MEMB 1 TO 2" in std_text
     # Right column: pinned base -> KZ 2
-    assert "KZ 2 MEMB 3 4" in std_text
-    # Clear span: rafter LZ splits at the ridge into 9m and 11m
-    assert "LZ 9 MEMB 5" in std_text
-    assert "LZ 11 MEMB 6" in std_text
-    assert "LX 1.5 MEMB 5 6" in std_text
-    assert "LY 1.5 MEMB 5 6" in std_text
+    assert "KZ 2 MEMB 3 TO 4" in std_text
+    assert "LZ 6.6 MEMB 3 TO 4" in std_text
+    # Both columns share LX/LY = max(1.2, 1.5) = 1.5, merged into one line
+    assert "LX 1.5 MEMB 1 TO 4" in std_text
+    assert "LY 1.5 MEMB 1 TO 4" in std_text
+    # Clear span: rafter LZ splits at the ridge into slope-corrected lengths
+    # sqrt(9^2 + 1.8^2) = 9.1782 and sqrt(11^2 + 2.2^2) = 11.2178
+    assert "LZ 9.1782 MEMB 5" in std_text
+    assert "LZ 11.2178 MEMB 6" in std_text
+    assert "LX 1.5 MEMB 5 TO 6" in std_text
+    assert "LY 1.5 MEMB 5 TO 6" in std_text
 
 
 def test_generate_std_file_rafter_parameters_with_interior_column():
@@ -147,9 +151,10 @@ def test_generate_std_file_rafter_parameters_with_interior_column():
         int_support="Pinned",
     )
     std_text = generate_std_file_content(params)
-    # Not a clear span: rafter breaks at the interior column (x=10), not the ridge.
-    assert "LZ 10 MEMB 4 5" in std_text
-    assert "LZ 10 MEMB 6" in std_text
+    # Not a clear span: rafter breaks at the interior column (x=10), not the
+    # ridge, and both symmetric spans have the same slope-corrected rafter
+    # length (10.198 m), so they merge onto a single line.
+    assert "LZ 10.198 MEMB 4 TO 6" in std_text
     # Interior column: unbraced LX/LY = full column length (rafter height at x=10)
     assert "KZ 2 MEMB 3" in std_text
     assert "LX 8.6 MEMB 3" in std_text
