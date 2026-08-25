@@ -28,18 +28,25 @@ Choose **STD to DXF**, then select one or more analytical beam members in an
 open STAAD model before exporting. The direct command remains available for
 development and automation: `staad-ext std-to-dxf`.
 
-For development and tests, install `python -m pip install -e ".[dev]"`, then run
-`pytest`.
-
 The exporter prompts for a DXF destination, projection plane, label option, and
 text scale. It attaches to the running STAAD.Pro instance; it does not start a
 new one.
+
+Choose **STD to GA Drawing** for the general-arrangement version of the same
+selection: every member carries a bubbled mark number instead of a label, and
+the section descriptions are collected into one MEMBER SIZE SCHEDULE placed in a
+chosen corner. Members sharing a section size *and* a steel grade share a mark.
+The direct command is `staad-ext std-to-ga-dxf`.
+
+For development and tests, install `python -m pip install -e ".[dev]"`, then run
+`pytest`.
 
 ## Layout
 
 - `staad_ext.openstaad`: reusable STAAD.Pro COM adapter
 - `staad_ext.application`: desktop home screen and utility registry
 - `staad_ext.workflows`: user-facing utility workflows
+- `staad_ext.framing`: shared model read and geometry solve for both DXF exporters
 - `staad_ext.dxf`: dependency-free ASCII DXF writer
 - `staad_ext.macros`: individual user-facing macros
 - `tests`: unit tests that do not require STAAD.Pro

@@ -14,6 +14,25 @@ PROG_ID = "StaadPro.OpenSTAAD"
 # this factor so callers never have to special-case the model's base unit.
 _INCHES_TO_METERS = 0.0254
 
+# STAAD reports a material's yield strength in the model's base force/length**2
+# unit: kip/in**2 under the English base unit, kN/m**2 under Metric. Models
+# built from an imported material table can come back already in N/mm**2 (or in
+# lb/in**2), so each base unit lists its likely factors most-likely-first and
+# the first candidate landing in a plausible structural range wins. A blank
+# GRADE cell in a schedule is better than one that is out by 1000x.
+_STRESS_TO_MPA = {1: (6.894757, 0.006894757), 2: (0.001, 1.0)}
+_PLAUSIBLE_MPA = (10.0, 1500.0)
+
+
+def _stress_to_mpa(value: float, base_unit: int) -> float | None:
+    if value <= 0:
+        return None
+    for factor in _STRESS_TO_MPA.get(base_unit, _STRESS_TO_MPA[2]):
+        candidate = value * factor
+        if _PLAUSIBLE_MPA[0] <= candidate <= _PLAUSIBLE_MPA[1]:
+            return candidate
+    return None
+
 
 class OpenStaadError(RuntimeError):
     """Raised when STAAD.Pro cannot provide the requested model data."""
@@ -32,6 +51,7 @@ class OpenStaad:
     def __init__(self, application: Any) -> None:
         self._application = application
         self._length_scale: float | None = None
+        self._yield_strengths: dict[str, float | None] = {}
         self.geometry = application.Geometry
         self.property = application.Property
         self.support = application.Support
@@ -47,7 +67,8 @@ class OpenStaad:
         _flag_methods(
             self.property,
             ("GetBeamSectionDisplayName", "GetBeamSectionName",
-             "GetBeamPropertyAll", "GetBeamSectionPropertyValuesEx", "GetBetaAngle"),
+             "GetBeamPropertyAll", "GetBeamSectionPropertyValuesEx", "GetBetaAngle",
+             "GetBeamMaterialName", "GetMaterialPropertyEx"),
         )
         _flag_methods(
             self.support,
@@ -237,6 +258,39 @@ class OpenStaad:
         )
         scale = self.length_scale()
         return int(property_type.value), [float(value) * scale for value in values.unpack()]
+
+    def beam_material_name(self, beam_no: int) -> str:
+        """Return the material assigned to a beam, or "" when none is readable."""
+        try:
+            return str(self.property.GetBeamMaterialName(beam_no) or "").strip()
+        except (OSError, TypeError, ValueError):
+            return ""
+
+    def material_yield_strength(self, material_name: str) -> float | None:
+        """Return a material's yield strength Fy in MPa, or None if unavailable.
+
+        Results are cached per material name: a schedule asks for the same
+        handful of materials once per member, and each miss is a COM round-trip.
+        """
+        if not material_name:
+            return None
+        if material_name not in self._yield_strengths:
+            self._yield_strengths[material_name] = self._read_yield_strength(material_name)
+        return self._yield_strengths[material_name]
+
+    def _read_yield_strength(self, material_name: str) -> float | None:
+        # STAAD.Pro 2025 documents this as:
+        #   OSPropertyUI::GetMaterialPropertyEx(strMaterialName, dElasticity,
+        #       dPoisson, dDensity, dAlpha, dDamp, Fy, Fu, Ry, Rt, Fcu)
+        # -- ten [out] doubles after the name, with Fy sixth.
+        outputs = [c_double() for _ in range(10)]
+        try:
+            self.property.GetMaterialPropertyEx(
+                material_name, *(byref(value) for value in outputs)
+            )
+        except (OSError, TypeError, ValueError):
+            return None
+        return _stress_to_mpa(float(outputs[5].value), self.base_unit())
 
     def support_nodes(self) -> list[int]:
         """Return every supported node in the current model."""

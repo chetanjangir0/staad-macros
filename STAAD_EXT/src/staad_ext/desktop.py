@@ -37,8 +37,11 @@ from staad_ext.macros.support_reactions import (
     reaction_envelopes,
 )
 from staad_ext.macros.std_to_dxf import export_selected_members
+from staad_ext.macros.std_to_ga_dxf import export_ga_drawing
 from staad_ext.macros.std_to_ifc import export_structure
-from staad_ext.models import ExportSettings, IfcExportSettings, ViewPlane
+from staad_ext.models import (
+    ExportSettings, GaExportSettings, IfcExportSettings, ScheduleCorner, ViewPlane,
+)
 from staad_ext.openstaad import OpenStaad, OpenStaadError
 
 
@@ -72,6 +75,13 @@ UTILITY_VIEWS = (
         "STD to DXF",
         "Export selected analytical members and section envelopes to AutoCAD.",
         "_build_dxf_view",
+    ),
+    UtilityView(
+        "std_to_ga_dxf",
+        "STD to GA Drawing",
+        "GA Drawing",
+        "Export selected members as a marked-up GA drawing with a member size schedule.",
+        "_build_ga_dxf_view",
     ),
     UtilityView(
         "std_to_ifc",
@@ -564,6 +574,115 @@ class StaadExtApplication:
                 self._set_status(
                     f"Exported {count} member(s) to {output}", "success"
                 )
+            else:
+                self._set_status(
+                    "No members exported. Select analytical members in STAAD.Pro and retry.",
+                    "warning",
+                )
+        except (OpenStaadError, OSError, TypeError, ValueError) as exc:
+            self._set_status(str(exc), "error")
+
+    def _build_ga_dxf_view(self, utility: UtilityView) -> None:
+        self._page_header(utility.title, utility.description)
+        panel = self._panel(self.content, 24)
+        panel.pack(fill="x")
+        panel.grid_columnconfigure(0, weight=1)
+
+        self.ga_path = tk.StringVar(value=str(Path.cwd() / "STAAD_Model_GA_Drawing.dxf"))
+        self.ga_plane = tk.StringVar(value=ViewPlane.XY.value)
+        self.ga_corner = tk.StringVar(value=ScheduleCorner.TOP_RIGHT.value)
+        self.ga_scale = tk.StringVar(value="1.0")
+        self.ga_blank_rows = tk.StringVar(value="4")
+        self.ga_marks = tk.BooleanVar(value=True)
+        self.ga_centerlines = tk.BooleanVar(value=True)
+
+        self._field_label(panel, "OUTPUT FILE", 0)
+        path_row = tk.Frame(panel, bg=self.PANEL)
+        path_row.grid(row=1, column=0, sticky="ew", pady=(7, 19))
+        path_row.grid_columnconfigure(0, weight=1)
+        self._dark_entry(path_row, self.ga_path).grid(row=0, column=0, sticky="ew")
+        self._secondary_button(path_row, "Browse", self._browse_ga_dxf).grid(
+            row=0, column=1, padx=(10, 0))
+
+        options = tk.Frame(panel, bg=self.PANEL)
+        options.grid(row=2, column=0, sticky="ew")
+        options.grid_columnconfigure((0, 1), weight=1, uniform="ga_options")
+        plane_panel = tk.Frame(options, bg=self.PANEL_ALT, padx=16, pady=14)
+        plane_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 7))
+        tk.Label(plane_panel, text="PROJECTION PLANE", bg=self.PANEL_ALT,
+                 fg=self.MUTED, font=("Segoe UI", 8, "bold")).pack(anchor="w")
+        plane_row = tk.Frame(plane_panel, bg=self.PANEL_ALT)
+        plane_row.pack(anchor="w", pady=(10, 0))
+        for plane in ViewPlane:
+            self._dark_radio(plane_row, plane.value, self.ga_plane, plane.value).pack(
+                side="left", padx=(0, 18))
+
+        corner_panel = tk.Frame(options, bg=self.PANEL_ALT, padx=16, pady=14)
+        corner_panel.grid(row=0, column=1, sticky="nsew", padx=(7, 0))
+        tk.Label(corner_panel, text="SCHEDULE POSITION", bg=self.PANEL_ALT,
+                 fg=self.MUTED, font=("Segoe UI", 8, "bold")).pack(anchor="w")
+        corner_row = tk.Frame(corner_panel, bg=self.PANEL_ALT)
+        corner_row.pack(anchor="w", pady=(8, 0))
+        for index, corner in enumerate(ScheduleCorner):
+            self._dark_radio(corner_row, corner.value, self.ga_corner, corner.value).grid(
+                row=index // 2, column=index % 2, sticky="w", padx=(0, 14))
+
+        sizes = tk.Frame(panel, bg=self.PANEL)
+        sizes.grid(row=3, column=0, sticky="ew", pady=(19, 0))
+        sizes.grid_columnconfigure((0, 1), weight=1, uniform="ga_sizes")
+        scale_panel = tk.Frame(sizes, bg=self.PANEL_ALT, padx=16, pady=14)
+        scale_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 7))
+        tk.Label(scale_panel, text="TEXT SIZE SCALE", bg=self.PANEL_ALT,
+                 fg=self.MUTED, font=("Segoe UI", 8, "bold")).pack(anchor="w")
+        self._dark_entry(scale_panel, self.ga_scale, width=14).pack(anchor="w", pady=(8, 0))
+
+        rows_panel = tk.Frame(sizes, bg=self.PANEL_ALT, padx=16, pady=14)
+        rows_panel.grid(row=0, column=1, sticky="nsew", padx=(7, 0))
+        tk.Label(rows_panel, text="SPARE SCHEDULE ROWS", bg=self.PANEL_ALT,
+                 fg=self.MUTED, font=("Segoe UI", 8, "bold")).pack(anchor="w")
+        self._dark_entry(rows_panel, self.ga_blank_rows, width=14).pack(anchor="w", pady=(8, 0))
+
+        checks = tk.Frame(panel, bg=self.PANEL)
+        checks.grid(row=4, column=0, sticky="w", pady=(19, 21))
+        self._dark_check(checks, "Mark members with bubbled numbers", self.ga_marks).pack(
+            anchor="w")
+        self._dark_check(checks, "Draw member centerlines", self.ga_centerlines).pack(
+            anchor="w", pady=(5, 0))
+
+        self._primary_button(panel, "Export GA drawing", self._export_ga_dxf).grid(
+            row=5, column=0, sticky="w")
+
+    def _browse_ga_dxf(self) -> None:
+        current = Path(self.ga_path.get())
+        selected = filedialog.asksaveasfilename(
+            parent=self.root,
+            title="Save GA drawing DXF",
+            initialdir=current.parent,
+            initialfile=current.name,
+            defaultextension=".dxf",
+            filetypes=(("DXF files", "*.dxf"),),
+        )
+        if selected:
+            self.ga_path.set(selected)
+
+    def _export_ga_dxf(self) -> None:
+        self._set_status("Connecting to STAAD.Pro…", "muted")
+        self.root.update_idletasks()
+        try:
+            output = Path(self.ga_path.get().strip()).with_suffix(".dxf")
+            if not output.name:
+                raise ValueError("Choose an output file.")
+            settings = GaExportSettings(
+                ViewPlane(self.ga_plane.get()),
+                float(self.ga_scale.get()),
+                ScheduleCorner(self.ga_corner.get()),
+                int(self.ga_blank_rows.get()),
+                self.ga_marks.get(),
+                self.ga_centerlines.get(),
+            )
+            count = export_ga_drawing(OpenStaad.connect(), output, settings)
+            if count:
+                self._set_status(f"Exported {count} member(s) to {output}", "success")
             else:
                 self._set_status(
                     "No members exported. Select analytical members in STAAD.Pro and retry.",
