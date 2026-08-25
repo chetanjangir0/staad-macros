@@ -5,7 +5,7 @@ from math import cos, hypot, radians, sin
 from pathlib import Path
 
 from staad_ext.ifc import IfcWriter
-from staad_ext.macros.std_to_dxf import is_tube_or_pipe
+from staad_ext.framing import is_tube_or_pipe
 from staad_ext.models import IfcExportSettings, Point3D
 from staad_ext.openstaad import OpenStaad
 

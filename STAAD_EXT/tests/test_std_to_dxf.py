@@ -1,9 +1,8 @@
 from io import StringIO
 
 from staad_ext.dxf import DxfWriter
-from staad_ext.macros.std_to_dxf import (
-    apply_peb_corner_joins, is_tapered, project, write_connection_face_lines,
-)
+from staad_ext.framing import apply_peb_corner_joins, is_tapered, project
+from staad_ext.macros.std_to_dxf import write_connection_face_lines
 from staad_ext.models import Point3D, SectionEnvelope, ViewPlane
 
 
