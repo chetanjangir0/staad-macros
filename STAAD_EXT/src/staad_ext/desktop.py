@@ -592,6 +592,7 @@ class StaadExtApplication:
         self.ga_plane = tk.StringVar(value=ViewPlane.XY.value)
         self.ga_corner = tk.StringVar(value=ScheduleCorner.TOP_RIGHT.value)
         self.ga_scale = tk.StringVar(value="1.0")
+        self.ga_mark_scale = tk.StringVar(value="1.0")
         self.ga_blank_rows = tk.StringVar(value="4")
         self.ga_marks = tk.BooleanVar(value=True)
         self.ga_centerlines = tk.BooleanVar(value=True)
@@ -629,15 +630,21 @@ class StaadExtApplication:
 
         sizes = tk.Frame(panel, bg=self.PANEL)
         sizes.grid(row=3, column=0, sticky="ew", pady=(19, 0))
-        sizes.grid_columnconfigure((0, 1), weight=1, uniform="ga_sizes")
+        sizes.grid_columnconfigure((0, 1, 2), weight=1, uniform="ga_sizes")
         scale_panel = tk.Frame(sizes, bg=self.PANEL_ALT, padx=16, pady=14)
         scale_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 7))
         tk.Label(scale_panel, text="TEXT SIZE SCALE", bg=self.PANEL_ALT,
                  fg=self.MUTED, font=("Segoe UI", 8, "bold")).pack(anchor="w")
         self._dark_entry(scale_panel, self.ga_scale, width=14).pack(anchor="w", pady=(8, 0))
 
+        mark_panel = tk.Frame(sizes, bg=self.PANEL_ALT, padx=16, pady=14)
+        mark_panel.grid(row=0, column=1, sticky="nsew", padx=(7, 7))
+        tk.Label(mark_panel, text="MARK BUBBLE SCALE", bg=self.PANEL_ALT,
+                 fg=self.MUTED, font=("Segoe UI", 8, "bold")).pack(anchor="w")
+        self._dark_entry(mark_panel, self.ga_mark_scale, width=14).pack(anchor="w", pady=(8, 0))
+
         rows_panel = tk.Frame(sizes, bg=self.PANEL_ALT, padx=16, pady=14)
-        rows_panel.grid(row=0, column=1, sticky="nsew", padx=(7, 0))
+        rows_panel.grid(row=0, column=2, sticky="nsew", padx=(7, 0))
         tk.Label(rows_panel, text="SPARE SCHEDULE ROWS", bg=self.PANEL_ALT,
                  fg=self.MUTED, font=("Segoe UI", 8, "bold")).pack(anchor="w")
         self._dark_entry(rows_panel, self.ga_blank_rows, width=14).pack(anchor="w", pady=(8, 0))
@@ -673,12 +680,13 @@ class StaadExtApplication:
             if not output.name:
                 raise ValueError("Choose an output file.")
             settings = GaExportSettings(
-                ViewPlane(self.ga_plane.get()),
-                float(self.ga_scale.get()),
-                ScheduleCorner(self.ga_corner.get()),
-                int(self.ga_blank_rows.get()),
-                self.ga_marks.get(),
-                self.ga_centerlines.get(),
+                plane=ViewPlane(self.ga_plane.get()),
+                text_scale=float(self.ga_scale.get()),
+                schedule_corner=ScheduleCorner(self.ga_corner.get()),
+                blank_rows=int(self.ga_blank_rows.get()),
+                write_marks=self.ga_marks.get(),
+                write_centerlines=self.ga_centerlines.get(),
+                mark_scale=float(self.ga_mark_scale.get()),
             )
             count = export_ga_drawing(OpenStaad.connect(), output, settings)
             if count:

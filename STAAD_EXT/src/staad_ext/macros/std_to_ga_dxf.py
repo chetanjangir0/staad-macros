@@ -12,6 +12,7 @@ see :mod:`staad_ext.framing`.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import hypot
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,16 @@ GA_LAYERS: tuple[tuple[str, int, str], ...] = (
 MARK_COLOR = 1        # red -- mark numbers, schedule title and headings
 DESCRIPTION_COLOR = 6  # magenta -- schedule descriptions and grades
 GRID_COLOR = 7        # white -- schedule rules and mark bubbles
+
+# Mark bubbles are drawn one size for the whole drawing, from the frame's
+# larger extent -- but that alone oversizes them on densely framed models, so
+# the radius is also held below a share of the closest gap between two members'
+# mark anchors. MARK_CLEARANCE_FACTOR below 0.5 is what keeps two neighbouring
+# bubbles from touching.
+MARK_RADIUS_FACTOR = 0.009
+MARK_CLEARANCE_FACTOR = 0.34
+MIN_MARK_RADIUS_FACTOR = 0.0025
+MARK_LEADER_RADII = 2.2
 
 SCHEDULE_TITLE = "MEMBER SIZE SCHEDULE"
 SCHEDULE_HEADINGS = ("MARK", "DESCRIPTION", "GRADE")
@@ -158,16 +169,39 @@ def _bubble(writer: DxfWriter, layer: str, center: Point3D, radius: float,
                 value, color)
 
 
+def mark_anchor(member: Member) -> Point3D:
+    """Return the point on a member's face that its mark leader points at."""
+    unit = mark_direction(member)
+    start, end = member.start, member.end
+    middle = Point3D((start.x + end.x) / 2, (start.y + end.y) / 2, (start.z + end.z) / 2)
+    return move(middle, unit, member.half_width)
+
+
+def mark_direction(member: Member) -> Point3D:
+    """Return the outward unit normal a member's mark is offset along."""
+    unit = offset_vector(member.start, member.end)
+    return Point3D(-unit.x, -unit.y, -unit.z) if unit.y < 0 else unit
+
+
+def mark_radius(model: FramingModel, settings: GaExportSettings) -> float:
+    """Size mark bubbles so neighbouring members' bubbles cannot collide."""
+    min_x, min_y, max_x, max_y = model.bounds()
+    extent = max(max_x - min_x, max_y - min_y, 1.0)
+    radius = extent * MARK_RADIUS_FACTOR
+    anchors = [mark_anchor(member) for member in model.members.values()]
+    gaps = [hypot(second.x - first.x, second.y - first.y)
+            for index, first in enumerate(anchors) for second in anchors[index + 1:]]
+    if gaps:
+        radius = min(radius, min(gaps) * MARK_CLEARANCE_FACTOR)
+    return max(radius, extent * MIN_MARK_RADIUS_FACTOR) * settings.mark_scale
+
+
 def write_mark_bubble(writer: DxfWriter, member: Member, mark: int,
                       radius: float) -> None:
     """Draw a member's mark bubble, offset clear of the section with a leader."""
-    start, end = member.start, member.end
-    unit = offset_vector(start, end)
-    if unit.y < 0:
-        unit = Point3D(-unit.x, -unit.y, -unit.z)
-    middle = Point3D((start.x + end.x) / 2, (start.y + end.y) / 2, (start.z + end.z) / 2)
-    anchor = move(middle, unit, member.half_width)
-    center = move(anchor, unit, radius * 3.0)
+    unit = mark_direction(member)
+    anchor = mark_anchor(member)
+    center = move(anchor, unit, radius * MARK_LEADER_RADII)
 
     writer.line("MARK_LEADERS", move(center, unit, -radius), anchor)
     head = radius * 0.5
@@ -249,8 +283,7 @@ def export_ga_drawing(staad: Any, output: Path, settings: GaExportSettings) -> i
     if not model:
         return 0
     marks, entries = build_schedule(staad, model)
-    min_x, min_y, max_x, max_y = model.bounds()
-    radius = max(max(max_x - min_x, max_y - min_y, 1.0) * 0.014, 0.15) * settings.text_scale
+    radius = mark_radius(model, settings)
 
     with dxf_document(output, GA_LAYERS) as writer:
         for member in model.members.values():

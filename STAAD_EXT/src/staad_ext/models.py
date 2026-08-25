@@ -60,10 +60,16 @@ class GaExportSettings:
     blank_rows: int = 4
     write_marks: bool = True
     write_centerlines: bool = True
+    # Bubbles are sized from the frame and capped against member spacing, but
+    # kept off text_scale: shrinking crowded bubbles must not shrink the
+    # schedule along with them.
+    mark_scale: float = 1.0
 
     def __post_init__(self) -> None:
         if not 0.1 <= self.text_scale <= 10.0:
             raise ValueError("text_scale must be between 0.1 and 10.0")
+        if not 0.1 <= self.mark_scale <= 10.0:
+            raise ValueError("mark_scale must be between 0.1 and 10.0")
         if not 0 <= self.blank_rows <= 40:
             raise ValueError("blank_rows must be between 0 and 40")
 

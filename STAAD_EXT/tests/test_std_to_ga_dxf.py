@@ -1,12 +1,14 @@
 from io import StringIO
+from math import hypot
 
 import pytest
 
 from staad_ext.dxf import DxfWriter
-from staad_ext.framing import FramingModel, Member
+from staad_ext.framing import FramingModel, Member, move
 from staad_ext.macros.std_to_ga_dxf import (
-    GA_LAYERS, build_schedule, describe_section, export_ga_drawing, member_grade,
-    write_mark_bubble, write_schedule,
+    GA_LAYERS, MARK_LEADER_RADII, build_schedule, describe_section, export_ga_drawing,
+    mark_anchor, mark_direction, mark_radius, member_grade, write_mark_bubble,
+    write_schedule,
 )
 from staad_ext.models import (
     GaExportSettings, Point3D, ScheduleCorner, SectionEnvelope, ViewPlane,
@@ -236,7 +238,65 @@ def test_export_returns_zero_without_a_selection(tmp_path) -> None:
     assert not output.exists()
 
 
+def spaced_frame(pitch, span=24.0):
+    """A cluster of vertical members at ``pitch`` centres over the left half of
+    a fixed span, plus one far member that pins the drawing extent.
+
+    Holding the extent constant means only the member spacing varies between
+    cases, which is what the bubble-sizing cap is supposed to react to.
+    """
+    positions = []
+    x = 0.0
+    while x <= span / 2 and len(positions) < 40:
+        positions.append(x)
+        x += pitch
+    positions.append(span)
+    return model_of(*[
+        make_member(number=index + 1, property_type=650, values=values_for(650),
+                    name="WEB", start=Point3D(position, 0), end=Point3D(position, 4),
+                    half_width=0.06)
+        for index, position in enumerate(positions)
+    ])
+
+
+def closest_bubble_gap(model, settings):
+    radius = mark_radius(model, settings)
+    centres = [move(mark_anchor(member), mark_direction(member), radius * MARK_LEADER_RADII)
+               for member in model.members.values()]
+    gap = min(hypot(b.x - a.x, b.y - a.y)
+              for index, a in enumerate(centres) for b in centres[index + 1:])
+    return radius, gap
+
+
+@pytest.mark.parametrize("pitch", [4.0, 2.0, 1.0, 0.5, 0.25])
+def test_mark_bubbles_never_overlap_at_any_member_spacing(pitch) -> None:
+    radius, gap = closest_bubble_gap(spaced_frame(pitch), GaExportSettings())
+    assert gap > 2 * radius, f"bubbles overlap at {pitch}m spacing"
+
+
+def test_crowded_framing_shrinks_the_bubbles() -> None:
+    settings = GaExportSettings()
+    assert mark_radius(spaced_frame(0.25), settings) < mark_radius(spaced_frame(4.0), settings)
+
+
+def test_bubble_size_is_capped_by_spacing_not_just_drawing_extent() -> None:
+    # Same overall extent, tighter members: the spacing cap must bind.
+    settings = GaExportSettings()
+    loose = mark_radius(spaced_frame(4.0), settings)
+    tight = mark_radius(spaced_frame(0.2), settings)
+    assert tight < loose * 0.9
+
+
+def test_mark_scale_resizes_bubbles_without_touching_schedule_text() -> None:
+    model = spaced_frame(4.0)
+    base = mark_radius(model, GaExportSettings())
+    assert mark_radius(model, GaExportSettings(mark_scale=0.5)) == pytest.approx(base * 0.5)
+    # text_scale drives the schedule, so it must leave the bubbles alone.
+    assert mark_radius(model, GaExportSettings(text_scale=3.0)) == pytest.approx(base)
+
+
 @pytest.mark.parametrize("field, value", [("text_scale", 0.0), ("text_scale", 11.0),
+                                          ("mark_scale", 0.0), ("mark_scale", 11.0),
                                           ("blank_rows", -1), ("blank_rows", 41)])
 def test_settings_reject_out_of_range_values(field, value) -> None:
     with pytest.raises(ValueError):
