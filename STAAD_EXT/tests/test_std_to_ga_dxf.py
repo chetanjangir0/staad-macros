@@ -105,13 +105,16 @@ def test_members_of_one_size_and_grade_share_a_mark() -> None:
     assert entries[0].beams == (1, 2, 3)
 
 
-def test_same_section_in_two_grades_is_scheduled_twice() -> None:
+def test_grade_column_is_left_blank_and_does_not_split_a_mark() -> None:
+    # The GRADE cell is filled in by hand for now, so differing STAAD materials
+    # must not hand two members of one size separate marks.
     members = [make_member(number=n, property_type=650, values=values_for(650),
                            name="TUB40030016") for n in (1, 2)]
     staad = FakeStaad(grades={2: "STEEL_E355"})
     marks, entries = build_schedule(staad, model_of(*members))
-    assert marks == {1: 1, 2: 2}
-    assert [entry.grade for entry in entries] == ["250Mpa", "355Mpa"]
+    assert marks == {1: 1, 2: 1}
+    assert [entry.grade for entry in entries] == [""]
+    assert staad.material_calls == 0
 
 
 def test_differently_named_sections_of_one_size_share_a_mark() -> None:
@@ -132,19 +135,10 @@ def test_marks_are_numbered_by_lowest_member_number() -> None:
     assert [entry.mark for entry in entries] == [1, 2]
 
 
-def test_grade_is_blank_when_the_material_is_unreadable() -> None:
-    class NoMaterials:
-        def beam_material_name(self, beam_no):
-            raise OSError("no material table")
-
-        def material_yield_strength(self, name):
-            raise AssertionError("should not be reached")
-
-    assert member_grade(NoMaterials(), 1) == ""
-
-
-def test_grade_is_blank_when_staad_has_no_material_api() -> None:
-    assert member_grade(object(), 1) == ""
+def test_grade_is_blank_and_never_reads_the_model() -> None:
+    staad = FakeStaad()
+    assert member_grade(staad, 1) == ""
+    assert staad.material_calls == 0
 
 
 def test_schedule_has_a_row_for_every_mark_plus_spares() -> None:

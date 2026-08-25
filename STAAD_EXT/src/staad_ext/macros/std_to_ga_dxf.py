@@ -125,13 +125,13 @@ def describe_section(member: Member) -> str:
 
 
 def member_grade(staad: Any, beam_no: int) -> str:
-    """Return a member's steel grade as "355Mpa", or "" when it is unreadable."""
-    try:
-        name = staad.beam_material_name(beam_no)
-        yield_strength = staad.material_yield_strength(name)
-    except (AttributeError, OSError, TypeError, ValueError):
-        return ""
-    return f"{round(yield_strength)}Mpa" if yield_strength else ""
+    """Return a member's steel grade for the schedule.
+
+    Blank for now. The column stays in the schedule so it can be filled in by
+    hand; the yield strength read back through ``beam_material_name`` and
+    ``material_yield_strength`` is left unused until it can be trusted.
+    """
+    return ""
 
 
 def build_schedule(staad: Any, model: FramingModel) -> tuple[dict[int, int], list[ScheduleEntry]]:
@@ -139,8 +139,8 @@ def build_schedule(staad: Any, model: FramingModel) -> tuple[dict[int, int], lis
 
     Members are grouped on the description and grade the schedule will print,
     not on the STAAD section name: two members whose rows would read
-    identically are the same physical size and must share one mark, while the
-    same profile in two steel grades is correctly scheduled twice.
+    identically are the same physical size and must share one mark. Grades are
+    blank for now, so in practice the description alone decides the mark.
     """
     grades = {number: member_grade(staad, number) for number in model.members}
     descriptions = {number: describe_section(member)
@@ -274,7 +274,9 @@ def write_schedule(writer: DxfWriter, model: FramingModel, entries: list[Schedul
                 row_height * 0.32, str(entry.mark))
         writer.text("SCHEDULE_TEXT", Point3D(edges[1] + padding, middle_y - text_height * 0.35),
                     text_height, 0.0, entry.description, DESCRIPTION_COLOR, halign=0)
-        centered(index, edges[2], edges[3], entry.grade, "SCHEDULE_TEXT", DESCRIPTION_COLOR)
+        if entry.grade:  # an empty GRADE cell is left for the user to fill in
+            centered(index, edges[2], edges[3], entry.grade, "SCHEDULE_TEXT",
+                     DESCRIPTION_COLOR)
 
 
 def export_ga_drawing(staad: Any, output: Path, settings: GaExportSettings) -> int:
