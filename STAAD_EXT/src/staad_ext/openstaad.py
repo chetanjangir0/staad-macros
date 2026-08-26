@@ -82,7 +82,7 @@ class OpenStaad:
         _flag_methods(
             self.output,
             ("AreResultsAvailable", "GetSupportReactions", "GetNodeDisplacements",
-             "GetMemberSteelDesignRatio", "GetSteelDesignParameterBlockCount"),
+             "GetMemberSteelDesignRatio"),
         )
         _flag_methods(
             self.load,
@@ -374,26 +374,32 @@ class OpenStaad:
                 f"{beam_no} (error {int(result)})."
             )
 
-    def steel_design_parameter_block_count(self) -> int:
-        """Return how many steel design parameter blocks the model defines."""
-        try:
-            return int(self.output.GetSteelDesignParameterBlockCount())
-        except (OSError, TypeError, ValueError):
-            return 0
-
     def steel_design_ratio(self, beam_no: int) -> float | None:
         """Return a member's critical steel design ratio, or None if undesigned.
 
         STAAD.Pro documents two sentinels in place of a ratio: -1 when no
         analysis has been run, and -999 when the analysis ran but the member
-        was not designed. Both mean "no usable ratio", so both come back None.
+        was not designed. Only the second is a fact about the member, so only
+        it comes back None; the first means the caller's own analysis never
+        landed, and a failed call means the query itself is broken. Reporting
+        either of those as "not designed" would blame the model for a fault
+        that is ours.
         """
         ratio = c_double()
         try:
             succeeded = self.output.GetMemberSteelDesignRatio(beam_no, byref(ratio))
-        except (OSError, TypeError, ValueError):
-            return None
+        except (OSError, TypeError, ValueError) as exc:
+            raise OpenStaadError(
+                "STAAD.Pro rejected the design ratio query for member "
+                f"{beam_no} ({exc})."
+            ) from exc
         value = float(ratio.value)
+        if value == -1.0:
+            raise OpenStaadError(
+                "STAAD.Pro reports that no analysis has been performed, so it "
+                f"has no design ratio for member {beam_no}. The analysis the "
+                "optimizer ran did not produce results."
+            )
         if not bool(succeeded) or value < 0:
             return None
         return value
@@ -420,14 +426,23 @@ class OpenStaad:
         except (OSError, TypeError, ValueError):
             pass
         try:
-            # AnalyzeEx(bSilent, bHidden, bWait) -- the third argument is what
+            # AnalyzeEx(nSilent, nHidden, nWait) -- the third argument is what
             # makes this synchronous, so results are readable when it returns.
-            self._application.AnalyzeEx(True, True, True)
+            # The arguments are documented as integers, not booleans, so they
+            # are passed as 1/0 rather than as Python bools (which marshal to
+            # VT_BOOL, where true is -1).
+            self._application.AnalyzeEx(1, 1, 1)
         except (OSError, TypeError, ValueError) as exc:
             raise OpenStaadError(
                 "STAAD.Pro could not run the analysis. Close the analysis window "
                 "if one is open, then retry."
             ) from exc
+        if not self.results_available():
+            raise OpenStaadError(
+                "STAAD.Pro finished the analysis but reports no results. Open "
+                "the model in STAAD.Pro and run the analysis once by hand to "
+                "see what it is objecting to."
+            )
 
     def update_structure(self) -> None:
         """Push pending property edits into the structure before analysing."""

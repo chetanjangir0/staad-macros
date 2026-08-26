@@ -372,9 +372,8 @@ class FakeStaad:
     INCIDENCE = {1: (1, 2), 2: (2, 3), 3: (3, 4), 4: (1, 4)}
 
     def __init__(self, selected: list[int] | None = None,
-                 design_blocks: int = 1, ratio: float = 0.4) -> None:
+                 ratio: float = 0.4) -> None:
         self.selected = selected or []
-        self.design_blocks = design_blocks
         self.ratio = ratio
         self.sections: dict[int, tuple[float, ...]] = {
             1: (0.400, 0.008, 0.700, 0.250, 0.016, 0.250, 0.016),
@@ -420,9 +419,6 @@ class FakeStaad:
     def load_combination_cases(self) -> list[int]:
         return [101, 102]
 
-    def steel_design_parameter_block_count(self) -> int:
-        return self.design_blocks
-
     def steel_design_ratio(self, beam: int) -> float | None:
         return self.ratio
 
@@ -459,8 +455,14 @@ def test_the_selection_wins_over_the_whole_model() -> None:
 
 
 def test_a_model_without_a_design_block_is_refused() -> None:
-    with pytest.raises(OpenStaadError, match="PARAMETER / CHECK CODE"):
-        optimize_tapered_sections(FakeStaad(design_blocks=0), settings())
+    # A model whose analysis never reaches a CHECK CODE designs nothing, which
+    # STAAD reports member by member rather than as a missing block.
+    class Undesigned(FakeStaad):
+        def steel_design_ratio(self, beam: int) -> float | None:
+            return None
+
+    with pytest.raises(OpenStaadError, match="needs a PARAMETER / CHECK CODE"):
+        optimize_tapered_sections(Undesigned(), settings())
 
 
 def test_a_deflection_combination_missing_from_the_model_is_refused() -> None:

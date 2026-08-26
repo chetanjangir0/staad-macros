@@ -1000,11 +1000,7 @@ def make_evaluator(staad: OpenStaad, frame: TaperFrame,
             else:
                 ratios[member.number] = ratio
         if undesigned:
-            raise OpenStaadError(
-                "STAAD.Pro returned no steel design ratio for member(s) "
-                f"{', '.join(str(number) for number in undesigned)}. Add them to "
-                "the PARAMETER / CHECK CODE block so the optimizer can judge them."
-            )
+            raise OpenStaadError(_undesigned_message(undesigned, ratios))
 
         horizontal: dict[tuple[int, int], float] = {}
         vertical: dict[tuple[int, int], float] = {}
@@ -1022,15 +1018,31 @@ def make_evaluator(staad: OpenStaad, frame: TaperFrame,
     return evaluate
 
 
-def _preflight(staad: OpenStaad, frame: TaperFrame,
-               settings: TaperOptimizerSettings) -> None:
-    if staad.steel_design_parameter_block_count() <= 0:
-        raise OpenStaadError(
-            "This model has no steel design parameter block. The optimizer sizes "
-            "sections against STAAD.Pro's own code check, so the model needs a "
-            "PARAMETER / CHECK CODE block covering the tapered members before it "
-            "can run."
+def _undesigned_message(undesigned: list[int], ratios: dict[int, float]) -> str:
+    """Explain a missing design ratio.
+
+    The optimizer sizes sections against STAAD.Pro's own code check, so it can
+    only judge a member the model actually designs. STAAD reports this the same
+    way whether the design block is missing entirely or simply does not list
+    the member, so the two cases are told apart by whether any member at all
+    came back with a ratio.
+    """
+    members = ", ".join(str(number) for number in undesigned)
+    if not ratios:
+        return (
+            "STAAD.Pro designed none of the tapered members, so the optimizer has "
+            "nothing to judge candidate sections by. The model needs a PARAMETER / "
+            "CHECK CODE block covering members " + members + ", and the analysis "
+            "has to reach it (a CHECK CODE placed after FINISH, or behind a LOAD "
+            "LIST that selects no cases, never runs)."
         )
+    return (
+        f"STAAD.Pro returned no steel design ratio for member(s) {members}. Add "
+        "them to the PARAMETER / CHECK CODE block so the optimizer can judge them."
+    )
+
+
+def _preflight(staad: OpenStaad, settings: TaperOptimizerSettings) -> None:
     available = set(staad.load_combination_cases())
     missing = [case for case in settings.deflection.load_cases
                if case not in available]
@@ -1052,7 +1064,7 @@ def optimize_tapered_sections(staad: OpenStaad, settings: TaperOptimizerSettings
     had to assign to the model's property table; they are left unassigned.
     """
     frame = read_tapered_frame(staad, settings)
-    _preflight(staad, frame, settings)
+    _preflight(staad, settings)
 
     cache: dict[tuple[float, ...], int] = {}
     result = optimize(frame, settings, make_evaluator(staad, frame, settings, progress),
