@@ -38,6 +38,26 @@ the section descriptions are collected into one MEMBER SIZE SCHEDULE placed in a
 chosen corner. Members sharing a section size *and* a steel grade share a mark.
 The direct command is `staad-ext std-to-ga-dxf`.
 
+Choose **Taper Optimizer** to size the tapered I sections of a 2D frame down to
+the lightest plates that still pass STAAD's own code check and your deflection
+limits. It optimizes the selected tapered members, or every tapered member when
+nothing is selected; geometry, loading and non-tapered sections are never
+changed. The direct command is `staad-ext optimize-tapers`.
+
+Sizes come off fixed fabrication ladders — web depth from 250mm in 50mm steps,
+flange width from 150mm in 25mm steps, both plate thicknesses off the stocked
+list, and the flange always thicker than the web. The two flanges are kept
+identical, and web depth is solved once per connected node so members
+continuing through a node always share a depth.
+
+The model needs a `PARAMETER` / `CHECK CODE` block covering the tapered members:
+the optimizer judges candidates by STAAD's design ratios, not by a check of its
+own. You supply the utilisation ceiling, the vertical and horizontal deflection
+limits, and the load combinations to check them against. Each candidate costs a
+full analysis, so the run is capped by an analysis budget; most of the saving
+lands in the first ten runs. The default is a dry run that reports what it
+would assign and puts every member back on the section it started with.
+
 For development and tests, install `python -m pip install -e ".[dev]"`, then run
 `pytest`.
 

@@ -57,7 +57,9 @@ class OpenStaad:
         self.support = application.Support
         self.output = application.Output
         self.load = application.Load
-        _flag_methods(application, ("GetSTAADFile", "GetBaseUnit", "SetInputUnits"))
+        _flag_methods(application, ("GetSTAADFile", "GetBaseUnit", "SetInputUnits",
+                                    "AnalyzeEx", "SetSilentMode",
+                                    "UpdateStructure"))
         _flag_methods(
             self.geometry,
             ("GetNoOfSelectedBeams", "GetSelectedBeams", "GetMemberIncidence",
@@ -68,7 +70,9 @@ class OpenStaad:
             self.property,
             ("GetBeamSectionDisplayName", "GetBeamSectionName",
              "GetBeamPropertyAll", "GetBeamSectionPropertyValuesEx", "GetBetaAngle",
-             "GetBeamMaterialName", "GetMaterialPropertyEx"),
+             "GetBeamMaterialName", "GetMaterialPropertyEx",
+             "GetBeamSectionPropertyRefNo", "CreateTaperedIProperty",
+             "AssignBeamProperty"),
         )
         _flag_methods(
             self.support,
@@ -76,7 +80,9 @@ class OpenStaad:
              "CreateSupportFixed", "CreateSupportPinned", "AssignSupportToNode"),
         )
         _flag_methods(
-            self.output, ("AreResultsAvailable", "GetSupportReactions")
+            self.output,
+            ("AreResultsAvailable", "GetSupportReactions", "GetNodeDisplacements",
+             "GetMemberSteelDesignRatio", "GetSteelDesignParameterBlockCount"),
         )
         _flag_methods(
             self.load,
@@ -105,6 +111,17 @@ class OpenStaad:
         if self._length_scale is None:
             self._length_scale = _INCHES_TO_METERS if self.base_unit() == 1 else 1.0
         return self._length_scale
+
+    def to_base_length(self, value_m: float) -> float:
+        """Convert meters back into the model's base length unit.
+
+        Every read on this facade normalizes to meters, so every write has to
+        undo that. Writing in the base unit -- rather than calling
+        SetInputUnits() first -- keeps the model's own unit settings untouched,
+        which matters because changing them would silently rescale what the
+        read methods return.
+        """
+        return value_m / self.length_scale()
 
     def model_path(self) -> Path:
         # STAAD.Pro 2025 documents this as:
@@ -291,6 +308,133 @@ class OpenStaad:
         except (OSError, TypeError, ValueError):
             return None
         return _stress_to_mpa(float(outputs[5].value), self.base_unit())
+
+    def beam_property_ref(self, beam_no: int) -> int:
+        """Return the section property number assigned to a beam, or 0 if none."""
+        try:
+            return int(self.property.GetBeamSectionPropertyRefNo(beam_no))
+        except (OSError, TypeError, ValueError):
+            return 0
+
+    def create_tapered_i_property(self, values_m: Iterable[float]) -> int:
+        """Create a tapered I section property and return its property number.
+
+        STAAD.Pro 2025 documents CreateTaperedIProperty as taking one
+        1-dimensional array of doubles:
+          0 F1 depth at start node      1 F2 web thickness
+          2 F3 depth at end node        3 F4 top flange width
+          4 F5 top flange thickness     5 F6 bottom flange width
+          6 F7 bottom flange thickness
+        It returns the new property ID, or 0 when the library could not create
+        it (-106/-108 report an unusable array argument).
+        """
+        from comtypes.safearray import _midlSAFEARRAY
+
+        base = [self.to_base_length(float(value)) for value in values_m]
+        if len(base) != 7:
+            raise OpenStaadError(
+                f"A tapered I property needs 7 dimensions, got {len(base)}."
+            )
+        # The parameter is [in], so the SAFEARRAY is passed by value rather
+        # than byref. Different comtypes/STAAD registrations disagree about
+        # whether a bare Python sequence marshals as VT_ARRAY|VT_R8, so fall
+        # back to one if the typed SAFEARRAY is rejected.
+        results: list[int] = []
+        for argument in (_midlSAFEARRAY(c_double).create(base), tuple(base)):
+            try:
+                result = int(self.property.CreateTaperedIProperty(argument))
+            except (OSError, TypeError, ValueError):
+                continue
+            if result > 0:
+                return result
+            results.append(result)
+        raise OpenStaadError(
+            "STAAD.Pro could not create a tapered I section property for "
+            f"{[round(value, 6) for value in base]} (returned {results or 'no result'})."
+        )
+
+    def assign_beam_property(self, beam_no: int, property_no: int) -> None:
+        """Assign an existing section property to one beam.
+
+        AssignBeamProperty takes the beam numbers as an array and returns 0 on
+        success; -3006 flags an invalid member and -6001 an invalid property.
+        """
+        from comtypes.safearray import _midlSAFEARRAY
+
+        beams = _midlSAFEARRAY(c_long).create([int(beam_no)])
+        try:
+            result = self.property.AssignBeamProperty(beams, int(property_no))
+        except (OSError, TypeError, ValueError) as exc:
+            raise OpenStaadError(
+                f"STAAD.Pro rejected the property assignment for member {beam_no}."
+            ) from exc
+        if result is not None and int(result) < 0:
+            raise OpenStaadError(
+                f"STAAD.Pro could not assign property {property_no} to member "
+                f"{beam_no} (error {int(result)})."
+            )
+
+    def steel_design_parameter_block_count(self) -> int:
+        """Return how many steel design parameter blocks the model defines."""
+        try:
+            return int(self.output.GetSteelDesignParameterBlockCount())
+        except (OSError, TypeError, ValueError):
+            return 0
+
+    def steel_design_ratio(self, beam_no: int) -> float | None:
+        """Return a member's critical steel design ratio, or None if undesigned.
+
+        STAAD.Pro documents two sentinels in place of a ratio: -1 when no
+        analysis has been run, and -999 when the analysis ran but the member
+        was not designed. Both mean "no usable ratio", so both come back None.
+        """
+        ratio = c_double()
+        try:
+            succeeded = self.output.GetMemberSteelDesignRatio(beam_no, byref(ratio))
+        except (OSError, TypeError, ValueError):
+            return None
+        value = float(ratio.value)
+        if not bool(succeeded) or value < 0:
+            return None
+        return value
+
+    def node_displacements(self, node_no: int, load_case: int) -> tuple[float, ...]:
+        """Return global X, Y, Z translations (meters) and rotations (radians)."""
+        from comtypes.safearray import _midlSAFEARRAY
+
+        values = _midlSAFEARRAY(c_double).create([0.0] * 6)
+        succeeded = self.output.GetNodeDisplacements(node_no, load_case, byref(values))
+        if not bool(succeeded):
+            raise OpenStaadError(
+                f"STAAD.Pro has no displacement result for node {node_no}, "
+                f"load case {load_case}."
+            )
+        unpacked = [float(value) for value in values.unpack()]
+        scale = self.length_scale()
+        return tuple(value * scale for value in unpacked[:3]) + tuple(unpacked[3:6])
+
+    def analyze(self) -> None:
+        """Run the analysis silently and block until STAAD.Pro has finished."""
+        try:
+            self._application.SetSilentMode(1)
+        except (OSError, TypeError, ValueError):
+            pass
+        try:
+            # AnalyzeEx(bSilent, bHidden, bWait) -- the third argument is what
+            # makes this synchronous, so results are readable when it returns.
+            self._application.AnalyzeEx(True, True, True)
+        except (OSError, TypeError, ValueError) as exc:
+            raise OpenStaadError(
+                "STAAD.Pro could not run the analysis. Close the analysis window "
+                "if one is open, then retry."
+            ) from exc
+
+    def update_structure(self) -> None:
+        """Push pending property edits into the structure before analysing."""
+        try:
+            self._application.UpdateStructure()
+        except (OSError, TypeError, ValueError):
+            pass
 
     def support_nodes(self) -> list[int]:
         """Return every supported node in the current model."""

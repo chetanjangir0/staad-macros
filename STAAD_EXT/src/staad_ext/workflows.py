@@ -7,9 +7,13 @@ from staad_ext.macros.plate_summary import selected_member_plate_summary
 from staad_ext.macros.std_to_dxf import export_selected_members
 from staad_ext.macros.std_to_ga_dxf import export_ga_drawing
 from staad_ext.macros.std_to_ifc import export_structure
+from staad_ext.macros.taper_optimizer import optimize_tapered_sections
 from staad_ext.models import GaExportSettings, IfcExportSettings
 from staad_ext.openstaad import OpenStaad, OpenStaadError
-from staad_ext.ui import ask_export_settings, show_plate_summary
+from staad_ext.ui import (
+    ask_export_settings, ask_taper_optimizer_settings, show_plate_summary,
+    show_taper_optimization,
+)
 
 
 def run_std_to_dxf(parent: Misc | None = None) -> bool:
@@ -108,6 +112,40 @@ def run_std_to_ifc(parent: Misc | None = None) -> bool:
     except (OpenStaadError, OSError, TypeError, ValueError) as exc:
         messagebox.showerror("STAAD_EXT", str(exc), parent=parent)
     return False
+
+
+def run_taper_optimizer(parent: Misc | None = None) -> bool:
+    """Optimize the tapered sections of the active model."""
+    try:
+        settings = ask_taper_optimizer_settings(parent=parent)
+        if settings is None:
+            return False
+        if settings.apply_to_model and not messagebox.askokcancel(
+            "STAAD_EXT",
+            "The optimized sections will be assigned to the open model, "
+            "replacing the tapered sections it has now.\n\n"
+            "Save a copy of the model first if you want to keep the current "
+            "sections. Continue?",
+            parent=parent,
+        ):
+            return False
+
+        result = optimize_tapered_sections(OpenStaad.connect(), settings)
+        if not result.feasible:
+            messagebox.showwarning(
+                "STAAD_EXT",
+                "No set of tapered sections satisfied the utilisation ceiling and "
+                "deflection limits within the depth, width and slenderness limits.\n\n"
+                "The model was left unchanged. Relax the limits, or check the "
+                "loading and design parameters, then retry.",
+                parent=parent,
+            )
+            return False
+        show_taper_optimization(result, parent=parent)
+        return True
+    except (OpenStaadError, OSError, TypeError, ValueError) as exc:
+        messagebox.showerror("STAAD_EXT", str(exc), parent=parent)
+        return False
 
 
 def run_plate_summary(parent: Misc | None = None) -> bool:

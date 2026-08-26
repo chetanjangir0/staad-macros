@@ -39,8 +39,12 @@ from staad_ext.macros.support_reactions import (
 from staad_ext.macros.std_to_dxf import export_selected_members
 from staad_ext.macros.std_to_ga_dxf import export_ga_drawing
 from staad_ext.macros.std_to_ifc import export_structure
+from staad_ext.macros.taper_optimizer import (
+    OptimizationResult, optimize_tapered_sections,
+)
 from staad_ext.models import (
-    ExportSettings, GaExportSettings, IfcExportSettings, ScheduleCorner, ViewPlane,
+    DeflectionLimits, ExportSettings, GaExportSettings, IfcExportSettings,
+    ScheduleCorner, TaperOptimizerSettings, ViewPlane,
 )
 from staad_ext.openstaad import OpenStaad, OpenStaadError
 
@@ -104,7 +108,19 @@ UTILITY_VIEWS = (
         "Review detailed support reactions and min/max envelopes for chosen load combinations.",
         "_build_support_reactions_view",
     ),
+    UtilityView(
+        "taper_optimizer",
+        "Taper Optimizer",
+        "Taper Optimizer",
+        "Size the tapered sections of a 2D frame down to the lightest plates that "
+        "still pass STAAD's code check and your deflection limits.",
+        "_build_taper_optimizer_view",
+    ),
 )
+
+# The dashboard lays its utility cards out in rows of four so the cards stay
+# readable as utilities are added.
+DASHBOARD_COLUMNS = 4
 
 
 class StaadExtApplication:
@@ -428,13 +444,17 @@ class StaadExtApplication:
 
         cards = tk.Frame(self.content, bg=self.BG)
         cards.pack(fill="both", expand=True)
-        for column, utility in enumerate(UTILITY_VIEWS):
+        for index, utility in enumerate(UTILITY_VIEWS):
+            row, column = divmod(index, DASHBOARD_COLUMNS)
             cards.grid_columnconfigure(column, weight=1, uniform="utilities")
+            cards.grid_rowconfigure(row, weight=1, uniform="utilityrows")
             card = self._panel(cards, 22)
-            card.grid(row=0, column=column, sticky="nsew", padx=(0 if column == 0 else 9,
-                                                                9 if column == 0 else 0))
+            card.grid(row=row, column=column, sticky="nsew",
+                      padx=(0 if column == 0 else 9,
+                            9 if column < DASHBOARD_COLUMNS - 1 else 0),
+                      pady=(0 if row == 0 else 9, 0))
             tk.Label(
-                card, text=f"{column + 1:02d}", bg=self.PANEL, fg=self.ACCENT,
+                card, text=f"{index + 1:02d}", bg=self.PANEL, fg=self.ACCENT,
                 font=("Consolas", 10, "bold"),
             ).pack(anchor="w")
             tk.Label(
@@ -955,6 +975,200 @@ class StaadExtApplication:
                     row.component, f"{row.minimum:,.3f}", row.minimum_node,
                     row.minimum_load_case, f"{row.maximum:,.3f}",
                     row.maximum_node, row.maximum_load_case))
+
+    def _build_taper_optimizer_view(self, utility: UtilityView) -> None:
+        self._page_header(utility.title, utility.description)
+        controls = self._panel(self.content, 16)
+        controls.pack(fill="x", pady=(0, 14))
+        for column in range(4):
+            controls.grid_columnconfigure(column, weight=1, uniform="taperfields")
+
+        self.taper_ceiling = tk.StringVar(value="0.95")
+        self.taper_vertical = tk.StringVar(value="240")
+        self.taper_horizontal = tk.StringVar(value="150")
+        self.taper_cases = tk.StringVar()
+        self.taper_budget = tk.StringVar(value="40")
+        self.taper_tie_knees = tk.BooleanVar(value=False)
+        self.taper_apply = tk.BooleanVar(value=False)
+
+        for column, (label, variable) in enumerate((
+            ("UTILISATION CEILING", self.taper_ceiling),
+            ("VERTICAL LIMIT  SPAN /", self.taper_vertical),
+            ("HORIZONTAL LIMIT  HEIGHT /", self.taper_horizontal),
+            ("ANALYSIS BUDGET (RUNS)", self.taper_budget),
+        )):
+            tk.Label(controls, text=label, bg=self.PANEL, fg=self.MUTED,
+                     font=("Segoe UI", 8, "bold")).grid(
+                row=0, column=column, sticky="w", padx=(0 if column == 0 else 10, 0))
+            self._dark_entry(controls, variable).grid(
+                row=1, column=column, sticky="ew", pady=(7, 0),
+                padx=(0 if column == 0 else 10, 0))
+
+        tk.Label(controls, text="DEFLECTION LOAD COMBINATIONS", bg=self.PANEL,
+                 fg=self.MUTED, font=("Segoe UI", 8, "bold")).grid(
+            row=2, column=0, columnspan=4, sticky="w", pady=(14, 0))
+        self._dark_entry(controls, self.taper_cases).grid(
+            row=3, column=0, columnspan=3, sticky="ew", pady=(7, 0))
+        self.taper_run_button = self._primary_button(
+            controls, "Optimize sections", self._run_taper_optimizer)
+        self.taper_run_button.grid(row=3, column=3, sticky="e", padx=(10, 0),
+                                   pady=(7, 0))
+
+        self._dark_check(
+            controls, "Match depths at knee joints too (different members meeting "
+            "at a node)", self.taper_tie_knees,
+        ).grid(row=4, column=0, columnspan=4, sticky="w", pady=(12, 0))
+        self._dark_check(
+            controls, "Assign the optimized sections to the model "
+            "(otherwise the model is restored and only the report is produced)",
+            self.taper_apply,
+        ).grid(row=5, column=0, columnspan=4, sticky="w", pady=(4, 0))
+        tk.Label(
+            controls,
+            text=("Optimizes the selected tapered members, or every tapered member "
+                  "when nothing is selected. Geometry, loading and non-tapered "
+                  "sections are never changed. The model needs a PARAMETER / "
+                  "CHECK CODE block, and each analysis run takes as long as a "
+                  "normal STAAD.Pro analysis. Searching leaves the candidate "
+                  "sections it tried in the model's property table; nothing is "
+                  "saved to disk, so closing the model without saving undoes "
+                  "the run either way."),
+            bg=self.PANEL, fg=self.MUTED, font=("Segoe UI", 8),
+            wraplength=980, justify="left",
+        ).grid(row=6, column=0, columnspan=4, sticky="w", pady=(10, 0))
+
+        metrics = tk.Frame(self.content, bg=self.BG)
+        metrics.pack(fill="x", pady=(0, 14))
+        self.taper_metrics: dict[str, tk.Label] = {}
+        for index, (key, title) in enumerate((
+            ("members", "TAPERED MEMBERS"),
+            ("resized", "SECTIONS RESIZED"),
+            ("analyses", "ANALYSIS RUNS"),
+            ("saved", "STEEL SAVED"),
+        )):
+            metrics.grid_columnconfigure(index, weight=1, uniform="tapermetric")
+            card = self._panel(metrics, 15)
+            card.grid(row=0, column=index, sticky="ew",
+                      padx=(0 if index == 0 else 7, 0 if index == 3 else 7))
+            tk.Label(card, text=title, bg=self.PANEL, fg=self.MUTED,
+                     font=("Segoe UI", 8, "bold")).pack(anchor="w")
+            value = tk.Label(card, text="—", bg=self.PANEL, fg=self.TEXT,
+                             font=("Segoe UI", 17, "bold"))
+            value.pack(anchor="w", pady=(5, 0))
+            self.taper_metrics[key] = value
+
+        table_panel = self._panel(self.content, 0)
+        table_panel.pack(fill="both", expand=True)
+        table_panel.grid_rowconfigure(0, weight=1)
+        table_panel.grid_columnconfigure(0, weight=1)
+        columns = ("member", "length", "before", "after", "ratio",
+                   "weight_before", "weight_after", "saved")
+        headings = ("Member", "Length (m)", "Existing section", "Optimized section",
+                    "Ratio", "Before (kg)", "After (kg)", "Saved (kg)")
+        widths = (70, 85, 280, 280, 60, 90, 90, 90)
+        numeric = {"length", "ratio", "weight_before", "weight_after", "saved"}
+        self.taper_table = ttk.Treeview(
+            table_panel, columns=columns, show="headings", style="Dark.Treeview")
+        for column, heading, width in zip(columns, headings, widths):
+            self.taper_table.heading(column, text=heading)
+            self.taper_table.column(column, width=width, minwidth=45,
+                                    anchor="e" if column in numeric else "w")
+        self.taper_table.tag_configure("resized", background="#12243d")
+        vertical = ttk.Scrollbar(table_panel, orient="vertical",
+                                 command=self.taper_table.yview,
+                                 style="Dark.Vertical.TScrollbar")
+        horizontal = ttk.Scrollbar(table_panel, orient="horizontal",
+                                   command=self.taper_table.xview,
+                                   style="Dark.Horizontal.TScrollbar")
+        self.taper_table.configure(yscrollcommand=vertical.set,
+                                   xscrollcommand=horizontal.set)
+        self.taper_table.grid(row=0, column=0, sticky="nsew", padx=1, pady=1)
+        vertical.grid(row=0, column=1, sticky="ns")
+        horizontal.grid(row=1, column=0, sticky="ew")
+
+    def _taper_settings(self) -> TaperOptimizerSettings:
+        return TaperOptimizerSettings(
+            deflection=DeflectionLimits(
+                vertical_span_ratio=float(self.taper_vertical.get()),
+                horizontal_height_ratio=float(self.taper_horizontal.get()),
+                load_cases=tuple(parse_load_cases(self.taper_cases.get())),
+            ),
+            utilisation_ceiling=float(self.taper_ceiling.get()),
+            tie_depths_at_all_shared_nodes=self.taper_tie_knees.get(),
+            analysis_budget=int(self.taper_budget.get()),
+            apply_to_model=self.taper_apply.get(),
+        )
+
+    def _run_taper_optimizer(self) -> None:
+        try:
+            settings = self._taper_settings()
+        except (TypeError, ValueError) as exc:
+            self._set_status(str(exc), "error")
+            return
+        if settings.apply_to_model and not messagebox.askokcancel(
+            "STAAD_EXT",
+            "The optimized sections will be assigned to the open model, replacing "
+            "the tapered sections it has now.\n\nSave a copy of the model first if "
+            "you want to keep the current sections. Continue?",
+            parent=self.root,
+        ):
+            return
+
+        # Each candidate costs a full STAAD.Pro analysis, so the run is long.
+        # It stays on this thread -- OpenSTAAD is an STA COM object and moving
+        # it to a worker would mean marshalling it across apartments -- and the
+        # progress callback pumps the event loop so the window keeps painting.
+        def progress(message: str) -> None:
+            self._set_status(message, "muted")
+            self.root.update()
+
+        self.taper_run_button.configure(state="disabled")
+        try:
+            result = optimize_tapered_sections(
+                OpenStaad.connect(), settings, progress)
+        except (OpenStaadError, OSError, TypeError, ValueError) as exc:
+            self._set_status(str(exc), "error")
+            return
+        finally:
+            self.taper_run_button.configure(state="normal")
+
+        self._render_taper_result(result)
+
+    def _render_taper_result(self, result: OptimizationResult) -> None:
+        self.taper_table.delete(*self.taper_table.get_children())
+        for change in result.changes:
+            saved = change.weight_before_kg - change.weight_after_kg
+            self.taper_table.insert(
+                "", "end",
+                values=(
+                    change.number, f"{change.length_m:.3f}",
+                    change.before.describe(), change.after.describe(),
+                    f"{change.ratio:.2f}" if change.ratio is not None else "—",
+                    f"{change.weight_before_kg:.1f}",
+                    f"{change.weight_after_kg:.1f}", f"{saved:.1f}",
+                ),
+                tags=("resized",) if change.changed else (),
+            )
+        resized = sum(1 for change in result.changes if change.changed)
+        self.taper_metrics["members"].configure(text=f"{len(result.changes):,}")
+        self.taper_metrics["resized"].configure(text=f"{resized:,}")
+        self.taper_metrics["analyses"].configure(text=f"{result.analyses_used:,}")
+        self.taper_metrics["saved"].configure(text=f"{result.saved_kg:,.1f} kg")
+
+        if not result.feasible:
+            self._set_status(
+                "No set of tapered sections satisfied the utilisation ceiling and "
+                "deflection limits. The model was left unchanged.", "error")
+            return
+        state = ("assigned to the model" if result.applied
+                 else "not assigned — dry run")
+        message = (f"Optimized {resized} of {len(result.changes)} tapered section(s) "
+                   f"in {result.analyses_used} analysis run(s): "
+                   f"{result.saved_kg:,.1f} kg saved "
+                   f"({result.saved_percent:.1f}%), {state}.")
+        if result.notes:
+            message = f"{message} {' '.join(result.notes)}"
+        self._set_status(message, "warning" if result.notes else "success")
 
     def _build_frame_generator_view(self, utility: UtilityView) -> None:
         self._page_header(utility.title, utility.description)
