@@ -416,7 +416,7 @@ class StaadExtApplication:
         hero = self._panel(self.content, 25)
         hero.pack(fill="x", pady=(0, 18))
         tk.Label(
-            hero, text="STAAD.Pro utilities, Made by Chetan Jangir out of the goodness of his heart.", bg=self.PANEL,
+            hero, text="STAAD.Pro utilities, Made by Chetan Jangir.", bg=self.PANEL,
             fg=self.TEXT, font=("Segoe UI", 17, "bold"),
         ).pack(anchor="w")
         tk.Label(
