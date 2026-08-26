@@ -386,10 +386,14 @@ class FakeStaad:
             100 + beam: values for beam, values in self.sections.items()
         }
         self.assigned: dict[int, int] = {beam: 100 + beam for beam in self.sections}
+        self.material: dict[int, str] = {beam: "STEEL" for beam in (1, 2, 3, 4)}
         self.analyses = 0
 
     def beam_property_ref(self, beam: int) -> int:
         return self.assigned.get(beam, 0)
+
+    def beam_material_name(self, beam: int) -> str:
+        return self.material.get(beam, "")
 
     # -- reads ------------------------------------------------------------
     def selected_beams(self) -> list[int]:
@@ -420,6 +424,10 @@ class FakeStaad:
         return [101, 102]
 
     def steel_design_ratio(self, beam: int) -> float | None:
+        # A member with no material is not designed, so losing the material
+        # assignment shows up here rather than as a wrong answer.
+        if not self.material.get(beam):
+            return None
         return self.ratio
 
     def node_displacements(self, node: int, load_case: int) -> tuple[float, ...]:
@@ -433,6 +441,12 @@ class FakeStaad:
 
     def assign_beam_property(self, beam: int, property_no: int) -> None:
         self.assigned[beam] = property_no
+        # STAAD.Pro drops the member's material when its property changes.
+        self.material.pop(beam, None)
+
+    def assign_material_to_beam(self, material_name: str, beam: int) -> None:
+        if material_name:
+            self.material[beam] = material_name
 
     def update_structure(self) -> None:
         pass
@@ -461,8 +475,19 @@ def test_a_model_without_a_design_block_is_refused() -> None:
         def steel_design_ratio(self, beam: int) -> float | None:
             return None
 
-    with pytest.raises(OpenStaadError, match="needs a PARAMETER / CHECK CODE"):
+    with pytest.raises(OpenStaadError, match="designed none of the tapered members"):
         optimize_tapered_sections(Undesigned(), settings())
+
+
+def test_every_property_write_puts_the_members_material_back() -> None:
+    # Assigning a property clears the material, which in a model whose
+    # materials come from one CONSTANTS block removes the block and leaves the
+    # members undesigned. Both the search and the restore have to repair it.
+    for apply_to_model in (False, True):
+        staad = FakeStaad()
+        optimize_tapered_sections(
+            staad, settings(analysis_budget=12, apply_to_model=apply_to_model))
+        assert staad.material == {1: "STEEL", 2: "STEEL", 3: "STEEL", 4: "STEEL"}
 
 
 def test_a_deflection_combination_missing_from_the_model_is_refused() -> None:

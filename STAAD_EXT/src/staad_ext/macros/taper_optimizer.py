@@ -211,6 +211,9 @@ class TaperFrame:
     # The property each member started on, so a dry run can hand the model back
     # its own properties rather than equivalent copies.
     original_property: Mapping[int, int] = field(default_factory=dict)
+    # The material each member started on. Assigning a property clears it, so
+    # every write has to put it back.
+    original_material: Mapping[int, str] = field(default_factory=dict)
 
     @property
     def numbers(self) -> tuple[int, ...]:
@@ -349,7 +352,8 @@ def _build_chains(members: Sequence[TaperedMember]) -> tuple[Chain, ...]:
 
 def build_frame(members: Sequence[TaperedMember], points: Mapping[int, Point3D],
                 base_level_m: float, tie_all: bool,
-                original_property: Mapping[int, int] | None = None) -> TaperFrame:
+                original_property: Mapping[int, int] | None = None,
+                original_material: Mapping[int, str] | None = None) -> TaperFrame:
     ordered = tuple(sorted(members, key=lambda member: member.number))
     return TaperFrame(
         members=ordered,
@@ -358,6 +362,7 @@ def build_frame(members: Sequence[TaperedMember], points: Mapping[int, Point3D],
         points=dict(points),
         base_level_m=base_level_m,
         original_property=dict(original_property or {}),
+        original_material=dict(original_material or {}),
     )
 
 
@@ -882,6 +887,7 @@ def read_tapered_frame(staad: OpenStaad,
     members: list[TaperedMember] = []
     points: dict[int, Point3D] = {}
     original_property: dict[int, int] = {}
+    original_material: dict[int, str] = {}
     for beam in beams:
         property_type, values = staad.section_property_values(beam)
         if property_type != TAPERED_I_PROPERTY_TYPE:
@@ -894,6 +900,9 @@ def read_tapered_frame(staad: OpenStaad,
         reference = staad.beam_property_ref(beam)
         if reference > 0:
             original_property[beam] = reference
+        material = staad.beam_material_name(beam)
+        if material:
+            original_material[beam] = material
         try:
             section = TaperedSection.from_property_values(values)
         except ValueError as exc:
@@ -935,7 +944,22 @@ def read_tapered_frame(staad: OpenStaad,
     levels = [points[node].y for node in supports] or [
         point.y for point in points.values()]
     return build_frame(members, points, min(levels),
-                       settings.tie_depths_at_all_shared_nodes, original_property)
+                       settings.tie_depths_at_all_shared_nodes, original_property,
+                       original_material)
+
+
+def _assign(staad: OpenStaad, frame: TaperFrame, number: int,
+            property_no: int) -> None:
+    """Put a member on a property, keeping the material it came with.
+
+    STAAD.Pro drops a member's material assignment when its property is
+    re-assigned. In a model whose materials come from a single `CONSTANTS`
+    block that removes the block outright, and a member with no material is
+    not designed -- so the code check the optimizer relies on would quietly
+    stop reporting ratios.
+    """
+    staad.assign_beam_property(number, property_no)
+    staad.assign_material_to_beam(frame.original_material.get(number, ""), number)
 
 
 def _assign_sections(staad: OpenStaad, frame: TaperFrame, state: DesignState,
@@ -951,7 +975,7 @@ def _assign_sections(staad: OpenStaad, frame: TaperFrame, state: DesignState,
         key = tuple(round(value, 9) for value in values)
         if key not in cache:
             cache[key] = staad.create_tapered_i_property(values)
-        staad.assign_beam_property(member.number, cache[key])
+        _assign(staad, frame, member.number, cache[key])
 
 
 def _restore_original(staad: OpenStaad, frame: TaperFrame,
@@ -967,13 +991,13 @@ def _restore_original(staad: OpenStaad, frame: TaperFrame,
     for member in frame.members:
         reference = frame.original_property.get(member.number, 0)
         if reference > 0:
-            staad.assign_beam_property(member.number, reference)
+            _assign(staad, frame, member.number, reference)
             continue
         values = frame.section_for(member.number, original).values_m()
         key = tuple(round(value, 9) for value in values)
         if key not in cache:
             cache[key] = staad.create_tapered_i_property(values)
-        staad.assign_beam_property(member.number, cache[key])
+        _assign(staad, frame, member.number, cache[key])
 
 
 def make_evaluator(staad: OpenStaad, frame: TaperFrame,
@@ -1031,10 +1055,12 @@ def _undesigned_message(undesigned: list[int], ratios: dict[int, float]) -> str:
     if not ratios:
         return (
             "STAAD.Pro designed none of the tapered members, so the optimizer has "
-            "nothing to judge candidate sections by. The model needs a PARAMETER / "
-            "CHECK CODE block covering members " + members + ", and the analysis "
-            "has to reach it (a CHECK CODE placed after FINISH, or behind a LOAD "
-            "LIST that selects no cases, never runs)."
+            "nothing to judge candidate sections by. Check that the model has a "
+            "PARAMETER / CHECK CODE block covering members " + members + ", that "
+            "the analysis reaches it (a CHECK CODE after FINISH, or behind a LOAD "
+            "LIST selecting no cases, never runs), that those members still have a "
+            "material assigned, and that the design code in use checks tapered I "
+            "sections at all."
         )
     return (
         f"STAAD.Pro returned no steel design ratio for member(s) {members}. Add "

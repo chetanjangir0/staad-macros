@@ -72,7 +72,7 @@ class OpenStaad:
              "GetBeamPropertyAll", "GetBeamSectionPropertyValuesEx", "GetBetaAngle",
              "GetBeamMaterialName", "GetMaterialPropertyEx",
              "GetBeamSectionPropertyRefNo", "CreateTaperedIProperty",
-             "AssignBeamProperty"),
+             "AssignBeamProperty", "AssignMaterialToMember"),
         )
         _flag_methods(
             self.support,
@@ -282,6 +282,24 @@ class OpenStaad:
             return str(self.property.GetBeamMaterialName(beam_no) or "").strip()
         except (OSError, TypeError, ValueError):
             return ""
+
+    def assign_material_to_beam(self, material_name: str, beam_no: int) -> None:
+        """Re-assign a material to one beam.
+
+        Assigning a property drops the member's material assignment, which in a
+        model whose materials come from a single CONSTANTS block takes the whole
+        block with it. Every property write therefore has to put the material
+        back, or the member silently loses its steel design.
+        """
+        if not material_name:
+            return
+        try:
+            self.property.AssignMaterialToMember(material_name, int(beam_no))
+        except (OSError, TypeError, ValueError) as exc:
+            raise OpenStaadError(
+                f"STAAD.Pro could not re-assign material {material_name!r} to "
+                f"member {beam_no}."
+            ) from exc
 
     def material_yield_strength(self, material_name: str) -> float | None:
         """Return a material's yield strength Fy in MPa, or None if unavailable.
