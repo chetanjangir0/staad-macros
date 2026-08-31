@@ -1009,8 +1009,15 @@ def make_evaluator(staad: OpenStaad, frame: TaperFrame,
     load_cases = settings.deflection.load_cases
 
     def evaluate(state: DesignState) -> Evaluation:
+        # Nothing is saved or reloaded between assigning the candidate and
+        # analysing it. The analysis writes the model out and runs the engine
+        # over what it wrote, so the sections just assigned are the ones
+        # judged. Reloading here (UpdateStructure) would restore the model from
+        # the file as it stood *before* those edits: the properties created for
+        # this candidate are deleted, the members drop back to the sections
+        # they already had, and the results are cleared -- so the analysis then
+        # either grades the wrong sections or reports nothing at all.
         _assign_sections(staad, frame, state, cache)
-        staad.update_structure()
         if progress is not None:
             progress("Running the STAAD.Pro analysis…")
         staad.analyze()
@@ -1088,7 +1095,15 @@ def optimize_tapered_sections(staad: OpenStaad, settings: TaperOptimizerSettings
     property it started with before returning, so a dry run changes nothing
     about the structure. Searching does add the candidate section properties it
     had to assign to the model's property table; they are left unassigned.
+
+    The model is saved on the way out either way. Every analysis writes the
+    candidate it is about to judge into the .STD file, so without a final save
+    the file would be left holding the last section tried rather than the one
+    the run decided on.
     """
+    # Before the first property write, not just before the first analysis: an
+    # assignment that raises a dialog blocks until somebody clicks it.
+    staad.set_silent_mode(True)
     frame = read_tapered_frame(staad, settings)
     _preflight(staad, settings)
 
@@ -1104,7 +1119,7 @@ def optimize_tapered_sections(staad: OpenStaad, settings: TaperOptimizerSettings
         _assign_sections(staad, frame, result.state, cache)
     else:
         _restore_original(staad, frame, cache)
-    staad.update_structure()
+    staad.save_model()
 
     notes = result.notes
     if settings.apply_to_model and not applied:

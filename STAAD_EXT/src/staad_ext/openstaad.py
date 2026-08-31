@@ -23,6 +23,18 @@ _INCHES_TO_METERS = 0.0254
 _STRESS_TO_MPA = {1: (6.894757, 0.006894757), 2: (0.001, 1.0)}
 _PLAUSIBLE_MPA = (10.0, 1500.0)
 
+# OpenSTAADUI::AnalyzeEx status codes. 2 (clean) and 3 (warnings only) are the
+# two that leave usable results behind; every other code is a run that did not
+# deliver any, and each says something different about why.
+_ANALYSIS_SUCCEEDED = frozenset((2, 3))
+_ANALYSIS_STATUS = {
+    -1: "the analysis was terminated",
+    0: "the analysis stopped on a general error",
+    1: "the analysis is still running",
+    4: "the analysis completed with errors",
+    5: "the analysis was never performed",
+}
+
 
 def _stress_to_mpa(value: float, base_unit: int) -> float | None:
     if value <= 0:
@@ -58,8 +70,7 @@ class OpenStaad:
         self.output = application.Output
         self.load = application.Load
         _flag_methods(application, ("GetSTAADFile", "GetBaseUnit", "SetInputUnits",
-                                    "AnalyzeEx", "SetSilentMode",
-                                    "UpdateStructure"))
+                                    "AnalyzeEx", "SetSilentMode", "SaveModel"))
         _flag_methods(
             self.geometry,
             ("GetNoOfSelectedBeams", "GetSelectedBeams", "GetMemberIncidence",
@@ -437,24 +448,42 @@ class OpenStaad:
         scale = self.length_scale()
         return tuple(value * scale for value in unpacked[:3]) + tuple(unpacked[3:6])
 
-    def analyze(self) -> None:
-        """Run the analysis silently and block until STAAD.Pro has finished."""
+    def set_silent_mode(self, enabled: bool = True) -> None:
+        """Suppress the dialogs STAAD.Pro raises during automated edits.
+
+        Property assignment, the analysis and SaveModel all put up dialogs that
+        block the COM call until somebody clicks them, which in an unattended
+        run reads as a hang. This has to be on before the first write, not
+        only before the analysis.
+        """
         try:
-            self._application.SetSilentMode(1)
+            self._application.SetSilentMode(1 if enabled else 0)
         except (OSError, TypeError, ValueError):
             pass
+
+    def analyze(self) -> None:
+        """Run the analysis silently and block until STAAD.Pro has finished.
+
+        AnalyzeEx writes the in-memory model out to its .STD file and runs the
+        engine over that, so the sections assigned since the last run are the
+        ones analysed. Nothing needs saving or reloading first -- and reloading
+        (UpdateStructure) would destroy them, since it restores the model from
+        the file as it stood before those edits.
+        """
+        self.set_silent_mode(True)
         try:
             # AnalyzeEx(nSilent, nHidden, nWait) -- the third argument is what
             # makes this synchronous, so results are readable when it returns.
             # The arguments are documented as integers, not booleans, so they
             # are passed as 1/0 rather than as Python bools (which marshal to
             # VT_BOOL, where true is -1).
-            self._application.AnalyzeEx(1, 1, 1)
+            status = self._application.AnalyzeEx(1, 1, 1)
         except (OSError, TypeError, ValueError) as exc:
             raise OpenStaadError(
                 "STAAD.Pro could not run the analysis. Close the analysis window "
                 "if one is open, then retry."
             ) from exc
+        self._check_analysis_status(status)
         if not self.results_available():
             raise OpenStaadError(
                 "STAAD.Pro finished the analysis but reports no results. Open "
@@ -462,12 +491,42 @@ class OpenStaad:
                 "see what it is objecting to."
             )
 
-    def update_structure(self) -> None:
-        """Push pending property edits into the structure before analysing."""
+    @staticmethod
+    def _check_analysis_status(status: Any) -> None:
+        """Turn AnalyzeEx's status code into a message that names the fault.
+
+        Without this the only symptom of a refused run is that no results
+        turned up afterwards, which says nothing about why.
+        """
         try:
-            self._application.UpdateStructure()
-        except (OSError, TypeError, ValueError):
-            pass
+            code = int(status)
+        except (TypeError, ValueError):
+            return  # Some registrations return nothing at all; results decide.
+        if code in _ANALYSIS_SUCCEEDED:
+            return
+        raise OpenStaadError(
+            "STAAD.Pro did not analyse the model: "
+            + _ANALYSIS_STATUS.get(code, f"AnalyzeEx returned status {code}")
+            + ". Open the model in STAAD.Pro and run the analysis once by hand "
+            "to see what it is objecting to."
+        )
+
+    def save_model(self) -> None:
+        """Write the in-memory model out to its .STD file.
+
+        The analysis saves the model itself, so during a search the file
+        already tracks whatever was last analysed. This is for the end of a
+        run, to leave the file agreeing with the model that is left behind.
+        """
+        self.set_silent_mode(True)
+        try:
+            self._application.SaveModel(1)
+        except (OSError, TypeError, ValueError) as exc:
+            raise OpenStaadError(
+                "STAAD.Pro could not save the model. The sections in the open "
+                "model are correct, but the .STD file still holds the last set "
+                "that was analysed -- save it in STAAD.Pro."
+            ) from exc
 
     def support_nodes(self) -> list[int]:
         """Return every supported node in the current model."""

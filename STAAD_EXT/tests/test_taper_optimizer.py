@@ -388,6 +388,11 @@ class FakeStaad:
         self.assigned: dict[int, int] = {beam: 100 + beam for beam in self.sections}
         self.material: dict[int, str] = {beam: "STEEL" for beam in (1, 2, 3, 4)}
         self.analyses = 0
+        self.saves = 0
+        self.silent = False
+        # The sections each analysis actually saw, so a run that graded
+        # something other than the candidate it assigned is visible.
+        self.analysed: list[dict[int, tuple[float, ...]]] = []
 
     def beam_property_ref(self, beam: int) -> int:
         return self.assigned.get(beam, 0)
@@ -448,11 +453,31 @@ class FakeStaad:
         if material_name:
             self.material[beam] = material_name
 
+    def set_silent_mode(self, enabled: bool = True) -> None:
+        self.silent = enabled
+
+    def save_model(self) -> None:
+        self.saves += 1
+
     def update_structure(self) -> None:
-        pass
+        # STAAD.Pro's UpdateStructure restores the model from its .STD file:
+        # it deletes the properties created since the last save, drops the
+        # members back onto the sections the file gives them, and clears the
+        # results. Calling it between assigning a candidate and analysing it
+        # therefore throws the candidate away -- so the fake refuses rather
+        # than letting the mistake come back unnoticed.
+        raise AssertionError(
+            "UpdateStructure reloads the model from disk and discards the "
+            "sections just assigned. The analysis saves the model itself; "
+            "nothing needs reloading before it."
+        )
 
     def analyze(self) -> None:
+        assert self.silent, "silent mode has to be on before STAAD.Pro is driven"
         self.analyses += 1
+        self.analysed.append(
+            {beam: self.properties[self.assigned[beam]] for beam in self.sections}
+        )
 
     def assigned_section(self, beam: int) -> tuple[float, ...]:
         return self.properties[self.assigned[beam]]
@@ -488,6 +513,29 @@ def test_every_property_write_puts_the_members_material_back() -> None:
         optimize_tapered_sections(
             staad, settings(analysis_budget=12, apply_to_model=apply_to_model))
         assert staad.material == {1: "STEEL", 2: "STEEL", 3: "STEEL", 4: "STEEL"}
+
+
+def test_every_analysis_grades_the_candidate_that_was_just_assigned() -> None:
+    # The optimizer only learns anything if STAAD judges the sections it just
+    # wrote. Reloading the model in between (UpdateStructure) puts the members
+    # back on the sections they already had, so every candidate would come
+    # back with the same ratios and the search would be reasoning about the
+    # model it started with.
+    staad = FakeStaad()
+    optimize_tapered_sections(staad, settings(analysis_budget=12))
+    assert len(staad.analysed) > 1
+    assert any(seen != staad.analysed[0] for seen in staad.analysed[1:])
+
+
+def test_the_run_saves_so_the_file_matches_the_model_it_leaves_behind() -> None:
+    # Each analysis writes the candidate it is about to judge into the .STD
+    # file, so a run that put the originals back only in memory would leave
+    # the file holding the last section tried.
+    for apply_to_model in (False, True):
+        staad = FakeStaad()
+        optimize_tapered_sections(
+            staad, settings(analysis_budget=12, apply_to_model=apply_to_model))
+        assert staad.saves == 1
 
 
 def test_a_deflection_combination_missing_from_the_model_is_refused() -> None:
