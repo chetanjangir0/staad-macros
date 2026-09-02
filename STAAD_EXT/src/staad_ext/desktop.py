@@ -989,6 +989,7 @@ class StaadExtApplication:
         self.taper_cases = tk.StringVar()
         self.taper_budget = tk.StringVar(value="40")
         self.taper_tie_knees = tk.BooleanVar(value=False)
+        self.taper_straight_columns = tk.BooleanVar(value=False)
         self.taper_apply = tk.BooleanVar(value=False)
 
         for column, (label, variable) in enumerate((
@@ -1019,10 +1020,15 @@ class StaadExtApplication:
             "at a node)", self.taper_tie_knees,
         ).grid(row=4, column=0, columnspan=4, sticky="w", pady=(12, 0))
         self._dark_check(
+            controls, "Keep columns straight -- one depth from base to eave, no "
+            "taper (the flange plates are still sized member by member)",
+            self.taper_straight_columns,
+        ).grid(row=5, column=0, columnspan=4, sticky="w", pady=(4, 0))
+        self._dark_check(
             controls, "Assign the optimized sections to the model "
             "(otherwise the model is restored and only the report is produced)",
             self.taper_apply,
-        ).grid(row=5, column=0, columnspan=4, sticky="w", pady=(4, 0))
+        ).grid(row=6, column=0, columnspan=4, sticky="w", pady=(4, 0))
         tk.Label(
             controls,
             text=("Optimizes the selected tapered members, or every tapered member "
@@ -1030,12 +1036,13 @@ class StaadExtApplication:
                   "sections are never changed. The model needs a PARAMETER / "
                   "CHECK CODE block, and each analysis run takes as long as a "
                   "normal STAAD.Pro analysis. Searching leaves the candidate "
-                  "sections it tried in the model's property table; nothing is "
-                  "saved to disk, so closing the model without saving undoes "
-                  "the run either way."),
+                  "sections it tried in the model's property table, and the model "
+                  "is saved on the way out -- each analysis writes the section it "
+                  "is testing into the .STD file, so the run has to put the file "
+                  "back itself."),
             bg=self.PANEL, fg=self.MUTED, font=("Segoe UI", 8),
             wraplength=980, justify="left",
-        ).grid(row=6, column=0, columnspan=4, sticky="w", pady=(10, 0))
+        ).grid(row=7, column=0, columnspan=4, sticky="w", pady=(10, 0))
 
         metrics = tk.Frame(self.content, bg=self.BG)
         metrics.pack(fill="x", pady=(0, 14))
@@ -1095,6 +1102,7 @@ class StaadExtApplication:
             ),
             utilisation_ceiling=float(self.taper_ceiling.get()),
             tie_depths_at_all_shared_nodes=self.taper_tie_knees.get(),
+            prismatic_columns=self.taper_straight_columns.get(),
             analysis_budget=int(self.taper_budget.get()),
             apply_to_model=self.taper_apply.get(),
         )

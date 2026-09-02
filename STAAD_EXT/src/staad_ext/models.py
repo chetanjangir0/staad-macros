@@ -126,6 +126,11 @@ class TaperOptimizerSettings:
     # continuation of one rafter, so by default only collinear members are
     # forced to share a depth at the node they meet.
     tie_depths_at_all_shared_nodes: bool = False
+    # Columns are often stocked and spliced as straight sections, so this holds
+    # every column run to one depth from base to eave -- the whole run, not
+    # each of its members, so a column split at an intermediate node cannot
+    # come back stepped.
+    prismatic_columns: bool = False
     analysis_budget: int = 40
     apply_to_model: bool = False
 

@@ -44,6 +44,25 @@ def portal_frame(tie_all: bool = False):
     return build_frame(members, points, 0.0, tie_all)
 
 
+def split_column_frame(prismatic_columns: bool):
+    """A column spliced at node 1, carrying a rafter away from its top.
+
+    The splice is what the prismatic option has to see through: holding each
+    member straight on its own would still allow a step in the web at node 1.
+    """
+    points = {
+        0: Point3D(0.0, 0.0), 1: Point3D(0.0, 3.0),
+        2: Point3D(0.0, 6.0), 3: Point3D(6.0, 7.0),
+    }
+    members = [
+        TaperedMember(1, 0, 1, 3.0, points[0], points[1], section(400.0, 500.0)),
+        TaperedMember(2, 1, 2, 3.0, points[1], points[2], section(500.0, 600.0)),
+        TaperedMember(3, 2, 3, 6.083, points[2], points[3], section(600.0, 400.0)),
+    ]
+    return build_frame(members, points, 0.0, tie_all=False,
+                       prismatic_columns=prismatic_columns)
+
+
 # --------------------------------------------------------------------------
 # Ladders
 # --------------------------------------------------------------------------
@@ -101,6 +120,35 @@ def test_the_seed_depth_at_a_shared_node_takes_the_deeper_of_the_two() -> None:
     ], points, 0.0, tie_all=False)
     state = frame.initial_state()
     assert state.depth_by_group[frame.group_of_end[(1, 1)]] == 650.0
+
+
+def test_a_column_run_shares_one_depth_only_when_it_is_held_straight() -> None:
+    tapered = split_column_frame(prismatic_columns=False)
+    assert tapered.group_of_end[(1, 0)] != tapered.group_of_end[(2, 1)]
+    straight = split_column_frame(prismatic_columns=True)
+    # Base to eave is one depth, across the splice at node 1 as well.
+    assert len({straight.group_of_end[(member, end)]
+                for member in (1, 2) for end in (0, 1)}) == 1
+    # ...and the rafter is left free to taper either way.
+    assert straight.group_of_end[(3, 0)] != straight.group_of_end[(3, 1)]
+
+
+def test_a_straight_column_is_seeded_from_the_deepest_section_it_carried() -> None:
+    # Collapsing four ends onto one depth has to round up, not average, or the
+    # first analysis would start from something weaker than the engineer drew.
+    frame = split_column_frame(prismatic_columns=True)
+    state = frame.initial_state()
+    for member in (1, 2):
+        assert frame.section_for(member, state) == section(600.0, 600.0)
+
+
+def test_a_column_held_straight_stays_straight_through_the_search() -> None:
+    frame = split_column_frame(prismatic_columns=True)
+    result = optimize(frame, settings(), lambda state: Evaluation(
+        {number: 0.4 for number in frame.numbers}))
+    after = {change.number: change.after for change in result.changes}
+    assert after[1].is_prismatic and after[2].is_prismatic
+    assert after[1].start_depth_mm == after[2].start_depth_mm
 
 
 def test_every_optimized_section_keeps_a_continuous_web_through_the_node() -> None:
@@ -513,6 +561,16 @@ def test_every_property_write_puts_the_members_material_back() -> None:
         optimize_tapered_sections(
             staad, settings(analysis_budget=12, apply_to_model=apply_to_model))
         assert staad.material == {1: "STEEL", 2: "STEEL", 3: "STEEL", 4: "STEEL"}
+
+
+def test_the_straight_column_setting_reaches_the_frame_it_shapes() -> None:
+    # Members 1 and 3 of the fake model are the columns; 2 is the rafter.
+    frame = read_tapered_frame(FakeStaad(), settings(prismatic_columns=True))
+    for column in (1, 3):
+        assert frame.group_of_end[(column, 0)] == frame.group_of_end[(column, 1)]
+    assert frame.group_of_end[(2, 0)] != frame.group_of_end[(2, 1)]
+    loose = read_tapered_frame(FakeStaad(), settings())
+    assert loose.group_of_end[(1, 0)] != loose.group_of_end[(1, 1)]
 
 
 def test_every_analysis_grades_the_candidate_that_was_just_assigned() -> None:

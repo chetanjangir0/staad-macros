@@ -151,6 +151,7 @@ def ask_taper_optimizer_settings(
     cases = StringVar(master=window, value="")
     budget = StringVar(master=window, value="40")
     tie_knees = BooleanVar(master=window, value=False)
+    straight_columns = BooleanVar(master=window, value=False)
     apply_now = BooleanVar(master=window, value=False)
     result: list[TaperOptimizerSettings] = []
 
@@ -164,6 +165,7 @@ def ask_taper_optimizer_settings(
                 ),
                 utilisation_ceiling=float(ceiling.get()),
                 tie_depths_at_all_shared_nodes=tie_knees.get(),
+                prismatic_columns=straight_columns.get(),
                 analysis_budget=int(budget.get()),
                 apply_to_model=apply_now.get(),
             )
@@ -201,20 +203,32 @@ def ask_taper_optimizer_settings(
         variable=tie_knees,
     ).grid(row=row, column=0, sticky="w", pady=(14, 2))
     ttk.Checkbutton(
-        frame, text="Assign the optimized sections to the model",
-        variable=apply_now,
+        frame, text="Keep columns straight (one depth, no taper)",
+        variable=straight_columns,
     ).grid(row=row + 1, column=0, sticky="w", pady=(4, 2))
     ttk.Label(
         frame,
-        text=("Leave unticked for a dry run: every member goes back on the section "
-              "it started with and only the report is produced. Either way nothing "
-              "is saved to disk, and the candidate sections the search tried stay "
-              "in the model's property table."),
+        text=("One depth from base to eave for each column, even where the column "
+              "is split into several members. The flange plates are still sized "
+              "member by member. Rafters taper either way."),
         foreground="#555555", wraplength=380, justify="left",
     ).grid(row=row + 2, column=0, sticky="w")
+    ttk.Checkbutton(
+        frame, text="Assign the optimized sections to the model",
+        variable=apply_now,
+    ).grid(row=row + 3, column=0, sticky="w", pady=(12, 2))
+    ttk.Label(
+        frame,
+        text=("Leave unticked for a dry run: every member goes back on the section "
+              "it started with and only the report is produced. The model is saved "
+              "either way, because each analysis writes the section it is testing "
+              "into the .STD file. The candidate sections the search tried stay in "
+              "the model's property table."),
+        foreground="#555555", wraplength=380, justify="left",
+    ).grid(row=row + 4, column=0, sticky="w")
 
     actions = ttk.Frame(frame)
-    actions.grid(row=row + 3, column=0, pady=(18, 0), sticky="e")
+    actions.grid(row=row + 5, column=0, pady=(18, 0), sticky="e")
     ttk.Button(actions, text="Cancel", command=window.destroy).pack(
         side="left", padx=4)
     ttk.Button(actions, text="Optimize", command=submit).pack(side="left")

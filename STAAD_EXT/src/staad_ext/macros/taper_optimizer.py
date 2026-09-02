@@ -14,6 +14,10 @@ Two rules shape the search:
 * **The two flanges are identical**, so each member carries one flange width and
   one flange thickness rather than separate top and bottom values.
 
+``prismatic_columns`` extends the first rule to a whole run: every end of every
+member in a column shares one depth, so the column comes back straight rather
+than tapered. Its flange plates still vary member by member.
+
 Sizes come off fixed fabrication ladders (see the module constants), and each
 candidate is judged by STAAD.Pro itself: the caller supplies an ``evaluate``
 callback that assigns the sections, re-runs the analysis, and reports back the
@@ -284,8 +288,8 @@ def _is_collinear(first: TaperedMember, second: TaperedMember) -> bool:
     return abs(ax * bx + ay * by) >= _COLLINEAR_TOLERANCE
 
 
-def _end_groups(members: Sequence[TaperedMember],
-                tie_all: bool) -> dict[tuple[int, int], int]:
+def _end_groups(members: Sequence[TaperedMember], tie_all: bool,
+                prismatic: Sequence[Chain] = ()) -> dict[tuple[int, int], int]:
     """Tie member ends that must share one web depth into numbered groups."""
     union = _UnionFind()
     for member in members:
@@ -300,6 +304,14 @@ def _end_groups(members: Sequence[TaperedMember],
                     if first_node == second_node:
                         union.union((first.number, first_end),
                                     (second.number, second_end))
+    # A run held prismatic is one depth from end to end, so every end of every
+    # member in it joins a single group. Tying the run rather than each of its
+    # members is what stops a column split at an intermediate node from coming
+    # back as two straight pieces of different depth.
+    for chain in prismatic:
+        ends = [(number, end) for number in chain.members for end in (0, 1)]
+        for other in ends[1:]:
+            union.union(ends[0], other)
     roots = {}
     groups: dict[tuple[int, int], int] = {}
     for member in members:
@@ -353,12 +365,16 @@ def _build_chains(members: Sequence[TaperedMember]) -> tuple[Chain, ...]:
 def build_frame(members: Sequence[TaperedMember], points: Mapping[int, Point3D],
                 base_level_m: float, tie_all: bool,
                 original_property: Mapping[int, int] | None = None,
-                original_material: Mapping[int, str] | None = None) -> TaperFrame:
+                original_material: Mapping[int, str] | None = None,
+                prismatic_columns: bool = False) -> TaperFrame:
     ordered = tuple(sorted(members, key=lambda member: member.number))
+    chains = _build_chains(ordered)
+    prismatic = tuple(chain for chain in chains
+                      if chain.is_column) if prismatic_columns else ()
     return TaperFrame(
         members=ordered,
-        group_of_end=_end_groups(ordered, tie_all),
-        chains=_build_chains(ordered),
+        group_of_end=_end_groups(ordered, tie_all, prismatic),
+        chains=chains,
         points=dict(points),
         base_level_m=base_level_m,
         original_property=dict(original_property or {}),
@@ -945,7 +961,7 @@ def read_tapered_frame(staad: OpenStaad,
         point.y for point in points.values()]
     return build_frame(members, points, min(levels),
                        settings.tie_depths_at_all_shared_nodes, original_property,
-                       original_material)
+                       original_material, settings.prismatic_columns)
 
 
 def _assign(staad: OpenStaad, frame: TaperFrame, number: int,
