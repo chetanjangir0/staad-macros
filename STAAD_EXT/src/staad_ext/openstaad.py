@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from ctypes import byref, c_double, c_long
 from pathlib import Path
+from time import monotonic, sleep
 from typing import Any, Iterable
 
 from staad_ext.models import Point3D
@@ -34,6 +35,20 @@ _ANALYSIS_STATUS = {
     4: "the analysis completed with errors",
     5: "the analysis was never performed",
 }
+# Codes that mean the engine never got as far as reading the model, so the
+# model is not what they are complaining about -- STAAD.Pro simply declined to
+# start, which it recovers from by itself, so they are worth another try. Code
+# 4 is not here: that engine did run, and read a model it objected to, so
+# repeating it would only object again several seconds later.
+_ANALYSIS_NEVER_RAN = frozenset((-1, 0, 1, 5))
+# Attempts per analysis, and how long to let STAAD.Pro settle before the later
+# ones. Observed refusals cleared on the attempt straight after, so three is a
+# margin over what it takes rather than a guess.
+_ANALYSIS_ATTEMPTS = 3
+_ANALYSIS_SETTLE_SECONDS = 2.0
+# A refused analysis returns in well under a second, so a run that is genuinely
+# still going is waited out rather than launched on top of.
+_ANALYSIS_IDLE_TIMEOUT_SECONDS = 600.0
 
 
 def _stress_to_mpa(value: float, base_unit: int) -> float | None:
@@ -70,7 +85,8 @@ class OpenStaad:
         self.output = application.Output
         self.load = application.Load
         _flag_methods(application, ("GetSTAADFile", "GetBaseUnit", "SetInputUnits",
-                                    "AnalyzeEx", "SetSilentMode", "SaveModel"))
+                                    "AnalyzeEx", "SetSilentMode", "SaveModel",
+                                    "IsAnalyzing"))
         _flag_methods(
             self.geometry,
             ("GetNoOfSelectedBeams", "GetSelectedBeams", "GetMemberIncidence",
@@ -461,6 +477,26 @@ class OpenStaad:
         except (OSError, TypeError, ValueError):
             pass
 
+    def is_analyzing(self) -> bool:
+        """Report whether STAAD.Pro currently has an analysis running."""
+        try:
+            return bool(self._application.IsAnalyzing())
+        except (OSError, TypeError, ValueError):
+            return False
+
+    def _wait_until_idle(self) -> None:
+        """Block while STAAD.Pro is still running an analysis.
+
+        A guard on the retry rather than a cure for anything seen: the
+        refusals measured so far all came back with STAAD.Pro already idle.
+        But status 1 says a run is still going, and launching a second
+        analysis on top of it could only make things worse, so a retry waits
+        whatever is running out rather than racing it.
+        """
+        deadline = monotonic() + _ANALYSIS_IDLE_TIMEOUT_SECONDS
+        while self.is_analyzing() and monotonic() < deadline:
+            sleep(0.5)
+
     def analyze(self) -> None:
         """Run the analysis silently and block until STAAD.Pro has finished.
 
@@ -469,20 +505,30 @@ class OpenStaad:
         ones analysed. Nothing needs saving or reloading first -- and reloading
         (UpdateStructure) would destroy them, since it restores the model from
         the file as it stood before those edits.
+
+        Driven back to back -- which is what an optimizer does -- STAAD.Pro
+        starts refusing to run at all after a while, returning "terminated"
+        having burned no CPU and written no output. Measured against one model
+        this landed on the 31st analysis of the session whether or not anything
+        had been edited in between, so it is a limit STAAD.Pro reaches on its
+        own rather than an objection to the model: the very same model analyses
+        cleanly on the next call. A refusal of that kind is therefore tried
+        again instead of being reported as a fault in the structure.
         """
         self.set_silent_mode(True)
-        try:
-            # AnalyzeEx(nSilent, nHidden, nWait) -- the third argument is what
-            # makes this synchronous, so results are readable when it returns.
-            # The arguments are documented as integers, not booleans, so they
-            # are passed as 1/0 rather than as Python bools (which marshal to
-            # VT_BOOL, where true is -1).
-            status = self._application.AnalyzeEx(1, 1, 1)
-        except (OSError, TypeError, ValueError) as exc:
-            raise OpenStaadError(
-                "STAAD.Pro could not run the analysis. Close the analysis window "
-                "if one is open, then retry."
-            ) from exc
+        status: Any = None
+        for attempt in range(_ANALYSIS_ATTEMPTS):
+            if attempt:
+                self._wait_until_idle()
+                # The first retry goes straight in: a refusal clears at once,
+                # and after 30-odd analyses at several seconds each, a pause
+                # that buys nothing is not worth the engineer's time. Later
+                # attempts back off, in case something slower is wrong.
+                if attempt > 1:
+                    sleep(_ANALYSIS_SETTLE_SECONDS)
+            status = self._run_analysis()
+            if self._analysis_delivered(status):
+                break
         self._check_analysis_status(status)
         if not self.results_available():
             raise OpenStaadError(
@@ -490,6 +536,33 @@ class OpenStaad:
                 "the model in STAAD.Pro and run the analysis once by hand to "
                 "see what it is objecting to."
             )
+
+    def _run_analysis(self) -> Any:
+        try:
+            # AnalyzeEx(nSilent, nHidden, nWait) -- the third argument is what
+            # makes this synchronous, so results are readable when it returns.
+            # The arguments are documented as integers, not booleans, so they
+            # are passed as 1/0 rather than as Python bools (which marshal to
+            # VT_BOOL, where true is -1).
+            return self._application.AnalyzeEx(1, 1, 1)
+        except (OSError, TypeError, ValueError) as exc:
+            raise OpenStaadError(
+                "STAAD.Pro could not run the analysis. Close the analysis window "
+                "if one is open, then retry."
+            ) from exc
+
+    @staticmethod
+    def _analysis_delivered(status: Any) -> bool:
+        """Report whether a status code is one worth stopping on.
+
+        A code that says the engine never ran is worth another attempt; every
+        other code -- including the two that succeed, and the one that means
+        the model itself was rejected -- is the answer.
+        """
+        try:
+            return int(status) not in _ANALYSIS_NEVER_RAN
+        except (TypeError, ValueError):
+            return True  # No code at all; whether results turned up decides.
 
     @staticmethod
     def _check_analysis_status(status: Any) -> None:
@@ -504,11 +577,21 @@ class OpenStaad:
             return  # Some registrations return nothing at all; results decide.
         if code in _ANALYSIS_SUCCEEDED:
             return
+        reason = _ANALYSIS_STATUS.get(code, f"AnalyzeEx returned status {code}")
+        if code in _ANALYSIS_NEVER_RAN:
+            # These never reached the model, so sending the user off to check
+            # the structure would point at the wrong thing entirely.
+            raise OpenStaadError(
+                f"STAAD.Pro refused to start the analysis {_ANALYSIS_ATTEMPTS} "
+                f"times running: {reason}. The model is not what it is objecting "
+                "to. Close any analysis or progress window left open in "
+                "STAAD.Pro, make sure no second copy of the model is being "
+                "analysed, and run the utility again."
+            )
         raise OpenStaadError(
-            "STAAD.Pro did not analyse the model: "
-            + _ANALYSIS_STATUS.get(code, f"AnalyzeEx returned status {code}")
-            + ". Open the model in STAAD.Pro and run the analysis once by hand "
-            "to see what it is objecting to."
+            f"STAAD.Pro did not analyse the model: {reason}. Open the model in "
+            "STAAD.Pro and run the analysis once by hand to see what it is "
+            "objecting to."
         )
 
     def save_model(self) -> None:

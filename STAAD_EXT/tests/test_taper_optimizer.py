@@ -420,9 +420,12 @@ class FakeStaad:
     INCIDENCE = {1: (1, 2), 2: (2, 3), 3: (3, 4), 4: (1, 4)}
 
     def __init__(self, selected: list[int] | None = None,
-                 ratio: float = 0.4) -> None:
+                 ratio: float = 0.4, fails_on_analysis: int | None = None) -> None:
         self.selected = selected or []
         self.ratio = ratio
+        # Which analysis (1-based) STAAD.Pro refuses, standing in for a run
+        # that stops part way through the search.
+        self.fails_on_analysis = fails_on_analysis
         self.sections: dict[int, tuple[float, ...]] = {
             1: (0.400, 0.008, 0.700, 0.250, 0.016, 0.250, 0.016),
             2: (0.700, 0.008, 0.500, 0.250, 0.016, 0.0, 0.0),
@@ -523,6 +526,8 @@ class FakeStaad:
     def analyze(self) -> None:
         assert self.silent, "silent mode has to be on before STAAD.Pro is driven"
         self.analyses += 1
+        if self.analyses == self.fails_on_analysis:
+            raise OpenStaadError("STAAD.Pro refused to start the analysis.")
         self.analysed.append(
             {beam: self.properties[self.assigned[beam]] for beam in self.sections}
         )
@@ -594,6 +599,72 @@ def test_the_run_saves_so_the_file_matches_the_model_it_leaves_behind() -> None:
         optimize_tapered_sections(
             staad, settings(analysis_budget=12, apply_to_model=apply_to_model))
         assert staad.saves == 1
+
+
+def test_a_run_that_stops_part_way_puts_the_original_sections_back() -> None:
+    # Every candidate is assigned to the real model to be judged, and every
+    # analysis writes it out to the .STD file. So a search that stops part way
+    # would otherwise leave the model holding a half-searched candidate -- one
+    # nothing has passed, and indistinguishable from a section the optimizer
+    # chose.
+    staad = FakeStaad(fails_on_analysis=3)
+    with pytest.raises(OpenStaadError, match="refused to start"):
+        optimize_tapered_sections(staad, settings(analysis_budget=12))
+
+    assert staad.analyses == 3               # it really did stop mid-search
+    assert staad.assigned == {1: 101, 2: 102, 3: 103}
+    for beam in (1, 2, 3):
+        assert staad.assigned_section(beam) == pytest.approx(staad.sections[beam])
+    # ...and the file is written, so it agrees with the restored model rather
+    # than holding the candidate the failed analysis wrote there.
+    assert staad.saves == 1
+    assert staad.material == {1: "STEEL", 2: "STEEL", 3: "STEEL", 4: "STEEL"}
+
+
+def test_a_run_stopped_part_way_still_reports_what_stopped_it() -> None:
+    # Restoring must not swallow the failure: a run that quietly puts the
+    # sections back and returns a result would read as a completed search that
+    # found nothing worth changing.
+    staad = FakeStaad(fails_on_analysis=2)
+    with pytest.raises(OpenStaadError) as raised:
+        optimize_tapered_sections(staad, settings(analysis_budget=12,
+                                                  apply_to_model=True))
+    assert "refused to start the analysis" in str(raised.value)
+
+
+def test_a_restore_that_also_fails_is_reported_rather_than_hidden() -> None:
+    # If the sections cannot be put back, the model really is left holding a
+    # candidate, and the engineer has to be told -- silence here would leave
+    # them trusting a model nothing designed.
+    class Unrestorable(FakeStaad):
+        def save_model(self) -> None:
+            raise OpenStaadError("STAAD.Pro could not save the model.")
+
+    staad = Unrestorable(fails_on_analysis=3)
+    with pytest.raises(OpenStaadError) as raised:
+        optimize_tapered_sections(staad, settings(analysis_budget=12))
+
+    message = str(raised.value)
+    assert "refused to start the analysis" in message      # the original fault
+    assert "could not be put back" in message              # and the consequence
+    assert "without saving" in message
+
+
+def test_an_interrupted_run_puts_the_original_sections_back() -> None:
+    # An engineer who gives up on a long search and interrupts it should not
+    # be left with a rewritten model either, so the restore cannot be hung off
+    # Exception alone.
+    class Interrupted(FakeStaad):
+        def analyze(self) -> None:
+            super().analyze()
+            if self.analyses == 3:
+                raise KeyboardInterrupt
+
+    staad = Interrupted()
+    with pytest.raises(KeyboardInterrupt):
+        optimize_tapered_sections(staad, settings(analysis_budget=12))
+    assert staad.assigned == {1: 101, 2: 102, 3: 103}
+    assert staad.saves == 1
 
 
 def test_a_deflection_combination_missing_from_the_model_is_refused() -> None:

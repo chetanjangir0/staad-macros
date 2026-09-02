@@ -1016,6 +1016,28 @@ def _restore_original(staad: OpenStaad, frame: TaperFrame,
         _assign(staad, frame, member.number, cache[key])
 
 
+def _restore_after_failure(staad: OpenStaad, frame: TaperFrame,
+                           cache: dict[tuple[float, ...], int],
+                           progress: Callable[[str], None] | None) -> bool:
+    """Put the model back after a run that did not finish. False if that failed.
+
+    Secondary failures are swallowed rather than raised: the caller is already
+    carrying the error that stopped the run, and that is the one worth
+    reporting. What the caller does need to know is whether the model is back
+    the way it was, which is what the return value says.
+    """
+    if progress is not None:
+        progress("Restoring the original sections…")
+    try:
+        _restore_original(staad, frame, cache)
+        staad.save_model()
+    # Every exception, not the usual narrow tuple: anything at all that goes
+    # wrong here would otherwise replace the error that stopped the run.
+    except Exception:  # noqa: BLE001
+        return False
+    return True
+
+
 def make_evaluator(staad: OpenStaad, frame: TaperFrame,
                    settings: TaperOptimizerSettings,
                    progress: Callable[[str], None] | None = None
@@ -1115,7 +1137,8 @@ def optimize_tapered_sections(staad: OpenStaad, settings: TaperOptimizerSettings
     The model is saved on the way out either way. Every analysis writes the
     candidate it is about to judge into the .STD file, so without a final save
     the file would be left holding the last section tried rather than the one
-    the run decided on.
+    the run decided on. That applies to a run that fails part way too: the
+    original sections are restored before the error is re-raised.
     """
     # Before the first property write, not just before the first analysis: an
     # assignment that raises a dialog blocks until somebody clicks it.
@@ -1124,8 +1147,26 @@ def optimize_tapered_sections(staad: OpenStaad, settings: TaperOptimizerSettings
     _preflight(staad, settings)
 
     cache: dict[tuple[float, ...], int] = {}
-    result = optimize(frame, settings, make_evaluator(staad, frame, settings, progress),
-                      progress)
+    try:
+        result = optimize(frame, settings,
+                          make_evaluator(staad, frame, settings, progress), progress)
+    except BaseException as exc:
+        # Every candidate is assigned to the real model to be judged, and every
+        # analysis writes that candidate out to the .STD file. So a run that
+        # stops part way -- an analysis STAAD.Pro refuses, an interrupt -- would
+        # otherwise walk away leaving both the model and the file holding
+        # whichever half-searched candidate happened to be under test. That is
+        # not a design anyone asked for, and it is indistinguishable from one
+        # the optimizer chose. Put the original sections back on the way out.
+        if not _restore_after_failure(staad, frame, cache, progress):
+            # One paragraph: this is shown in a status line, where a blank line
+            # would push the rest of it out of sight.
+            raise OpenStaadError(
+                f"{exc} The original sections could not be put back either, so "
+                "the model is left holding the last section the optimizer "
+                "tried. Close it in STAAD.Pro without saving, then reopen it."
+            ) from exc
+        raise
 
     applied = settings.apply_to_model and result.feasible
     if progress is not None:
