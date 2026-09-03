@@ -30,6 +30,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from math import hypot
+from time import monotonic
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from staad_ext.models import Point3D, TaperOptimizerSettings
@@ -788,6 +789,76 @@ def _changes(frame: TaperFrame, state: DesignState,
     ) for member in frame.members)
 
 
+def _format_remaining(seconds: float) -> str:
+    """Phrase a duration the way a status line should read it."""
+    if seconds < 90.0:
+        return "under a minute"
+    minutes = int(seconds / 60.0 + 0.5)
+    if minutes < 60:
+        return f"{minutes} min"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h" if not minutes else f"{hours}h {minutes} min"
+
+
+class SearchProgress:
+    """Counts the analyses a search has run and estimates what is left of it.
+
+    Every candidate costs a full STAAD.Pro analysis -- a few seconds on a small
+    frame, the better part of a minute on a large one -- so a run is minutes of
+    silence with nothing to show until it ends. Reporting the count against the
+    budget, at the rate the analyses have actually taken, is the difference
+    between waiting and wondering whether it has hung.
+
+    The estimate is an upper bound rather than a prediction. The budget caps
+    the count, but the search stops the moment it runs out of reductions worth
+    trying, which on a small frame is well short of it.
+    """
+
+    def __init__(self, budget: int,
+                 report: Callable[[str], None] | None = None) -> None:
+        self.budget = budget
+        self.completed = 0
+        self._report = report
+        self._elapsed = 0.0
+
+    @property
+    def has_budget(self) -> bool:
+        return self.completed < self.budget
+
+    @property
+    def exhausted(self) -> bool:
+        return self.completed >= self.budget
+
+    def run(self, evaluate: Callable[[DesignState], Evaluation], phase: str,
+            state: DesignState) -> Evaluation:
+        """Announce the analysis about to run, then run it and time it."""
+        self._announce(phase)
+        started = monotonic()
+        evaluation = evaluate(state)
+        # Only a completed analysis counts towards the rate: one that raised
+        # stops the run anyway, and its part-elapsed time would drag the
+        # estimate around for no one's benefit.
+        self._elapsed += monotonic() - started
+        self.completed += 1
+        return evaluation
+
+    def _announce(self, phase: str) -> None:
+        """Post the line that has to survive the whole analysis.
+
+        It goes out *before* the analysis rather than after, because that is
+        the minute it has to cover: nothing repaints the status again until
+        STAAD.Pro returns.
+        """
+        if self._report is None:
+            return
+        line = f"{phase}: analysis {self.completed + 1} of {self.budget}"
+        if self.completed:
+            rate = self._elapsed / self.completed
+            left = _format_remaining(rate * (self.budget - self.completed))
+            line += f", up to {left} left"
+        self._report(line + "…")
+
+
 def optimize(frame: TaperFrame, settings: TaperOptimizerSettings,
              evaluate: Callable[[DesignState], Evaluation],
              progress: Callable[[str], None] | None = None) -> OptimizationResult:
@@ -797,22 +868,16 @@ def optimize(frame: TaperFrame, settings: TaperOptimizerSettings,
     returns the resulting design ratios and deflection checks. It is called once
     per analysis, and the ``analysis_budget`` setting caps how many times.
     """
-    def report(message: str) -> None:
-        if progress is not None:
-            progress(message)
-
     ceiling = settings.utilisation_ceiling
     state, seed_notes = prepare_seed(frame, settings)
     notes: list[str] = list(seed_notes)
-    used = 0
+    search = SearchProgress(settings.analysis_budget, progress)
 
-    report("Checking the starting sections…")
-    evaluation = evaluate(state)
-    used += 1
+    evaluation = search.run(evaluate, "Checking the starting sections", state)
 
     # Phase 1 -- lift the frame until it passes. A model that already passes
     # skips this entirely, which is the usual case.
-    while not evaluation.is_feasible(ceiling) and used < settings.analysis_budget:
+    while not evaluation.is_feasible(ceiling) and search.has_budget:
         failing = set(evaluation.failed_members(ceiling))
         # A failed deflection belongs to a whole run, not to one node, so the
         # entire chain that owns the node has to stiffen.
@@ -828,14 +893,12 @@ def optimize(frame: TaperFrame, settings: TaperOptimizerSettings,
             )
             break
         state = stronger
-        report(f"Strengthening ({used} analyses so far)…")
-        evaluation = evaluate(state)
-        used += 1
+        evaluation = search.run(evaluate, "Strengthening", state)
 
     if not evaluation.is_feasible(ceiling):
         return OptimizationResult(
-            _changes(frame, state, evaluation), state, evaluation, used,
-            feasible=False, budget_exhausted=used >= settings.analysis_budget,
+            _changes(frame, state, evaluation), state, evaluation,
+            search.completed, feasible=False, budget_exhausted=search.exhausted,
             notes=tuple(notes),
         )
 
@@ -845,34 +908,30 @@ def optimize(frame: TaperFrame, settings: TaperOptimizerSettings,
     # and tests them together; tightening the threshold after a failure narrows
     # the set instead of abandoning the descent.
     for fraction in (1.0, 0.75, 0.5):
-        while used < settings.analysis_budget:
+        while search.has_budget:
             candidate = _bulk_step_down(best_state, best_evaluation, frame,
                                         settings, ceiling * fraction)
             if candidate is None:
                 break
-            report(f"Reducing sections ({used} analyses so far)…")
-            evaluation = evaluate(candidate)
-            used += 1
+            evaluation = search.run(evaluate, "Reducing sections", candidate)
             if not evaluation.is_feasible(ceiling):
                 break
             best_state, best_evaluation = candidate, evaluation
 
     # Phase 3 -- single steps, heaviest saving first, locking whatever fails.
     locked: set[Variable] = set()
-    while used < settings.analysis_budget:
+    while search.has_budget:
         options = _descent_options(best_state, frame, settings, locked)
         if not options:
             break
         variable, candidate, _saving = options[0]
-        report(f"Fine-tuning ({used} analyses so far)…")
-        evaluation = evaluate(candidate)
-        used += 1
+        evaluation = search.run(evaluate, "Fine-tuning", candidate)
         if evaluation.is_feasible(ceiling):
             best_state, best_evaluation = candidate, evaluation
         else:
             locked.add(variable)
 
-    exhausted = used >= settings.analysis_budget
+    exhausted = search.exhausted
     if exhausted and _descent_options(best_state, frame, settings, locked):
         notes.append(
             f"Stopped at the {settings.analysis_budget}-analysis budget with "
@@ -880,7 +939,8 @@ def optimize(frame: TaperFrame, settings: TaperOptimizerSettings,
         )
     return OptimizationResult(
         _changes(frame, best_state, best_evaluation), best_state, best_evaluation,
-        used, feasible=True, budget_exhausted=exhausted, notes=tuple(notes),
+        search.completed, feasible=True, budget_exhausted=exhausted,
+        notes=tuple(notes),
     )
 
 
@@ -1039,10 +1099,15 @@ def _restore_after_failure(staad: OpenStaad, frame: TaperFrame,
 
 
 def make_evaluator(staad: OpenStaad, frame: TaperFrame,
-                   settings: TaperOptimizerSettings,
-                   progress: Callable[[str], None] | None = None
+                   settings: TaperOptimizerSettings
                    ) -> Callable[[DesignState], Evaluation]:
-    """Build the callback that asks STAAD.Pro to judge a candidate."""
+    """Build the callback that asks STAAD.Pro to judge a candidate.
+
+    Progress is not reported from here. The search posts one line per analysis
+    before calling this, and that line has to stay up for as long as the
+    analysis takes; a second message from inside would replace the count and
+    the estimate with something that says nothing, for the whole of the wait.
+    """
     cache: dict[tuple[float, ...], int] = {}
     load_cases = settings.deflection.load_cases
 
@@ -1056,8 +1121,6 @@ def make_evaluator(staad: OpenStaad, frame: TaperFrame,
         # they already had, and the results are cleared -- so the analysis then
         # either grades the wrong sections or reports nothing at all.
         _assign_sections(staad, frame, state, cache)
-        if progress is not None:
-            progress("Running the STAAD.Pro analysis…")
         staad.analyze()
 
         ratios: dict[int, float] = {}
@@ -1149,7 +1212,7 @@ def optimize_tapered_sections(staad: OpenStaad, settings: TaperOptimizerSettings
     cache: dict[tuple[float, ...], int] = {}
     try:
         result = optimize(frame, settings,
-                          make_evaluator(staad, frame, settings, progress), progress)
+                          make_evaluator(staad, frame, settings), progress)
     except BaseException as exc:
         # Every candidate is assigned to the real model to be judged, and every
         # analysis writes that candidate out to the .STD file. So a run that

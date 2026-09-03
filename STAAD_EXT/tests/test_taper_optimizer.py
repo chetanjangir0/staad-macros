@@ -4,10 +4,12 @@ import pytest
 
 from staad_ext.models import DeflectionLimits, Point3D, TaperOptimizerSettings
 from staad_ext.openstaad import OpenStaadError
+from staad_ext.macros import taper_optimizer
 from staad_ext.macros.taper_optimizer import (
-    DesignState, Evaluation, PLATE_THICKNESS_MM, TaperedMember, TaperedSection,
-    build_frame, deflection_checks, ladder, optimize, optimize_tapered_sections,
-    prepare_seed, read_tapered_frame, snap_to_ladders, snap_up,
+    DesignState, Evaluation, PLATE_THICKNESS_MM, SearchProgress, TaperedMember,
+    TaperedSection, build_frame, deflection_checks, ladder, optimize,
+    optimize_tapered_sections, prepare_seed, read_tapered_frame, snap_to_ladders,
+    snap_up,
 )
 
 
@@ -599,6 +601,84 @@ def test_the_run_saves_so_the_file_matches_the_model_it_leaves_behind() -> None:
         optimize_tapered_sections(
             staad, settings(analysis_budget=12, apply_to_model=apply_to_model))
         assert staad.saves == 1
+
+
+def test_the_status_counts_the_analyses_against_the_budget() -> None:
+    # A run is minutes of silence, so the line that is up while STAAD.Pro
+    # works has to say how far along it is.
+    messages: list[str] = []
+    optimize_tapered_sections(FakeStaad(), settings(analysis_budget=12),
+                              progress=messages.append)
+
+    analyses = [line for line in messages if "analysis " in line]
+    assert analyses, messages
+    assert analyses[0].startswith("Checking the starting sections: analysis 1 of 12")
+    # Every analysis is numbered, in order, and none is numbered past the
+    # budget it is counted against.
+    numbers = [int(line.split("analysis ")[1].split(" of ")[0])
+               for line in analyses]
+    assert numbers == list(range(1, len(numbers) + 1))
+    assert numbers[-1] <= 12
+
+
+def test_the_status_estimates_the_time_left_once_it_has_something_to_go_on() -> None:
+    messages: list[str] = []
+    optimize_tapered_sections(FakeStaad(), settings(analysis_budget=12),
+                              progress=messages.append)
+
+    analyses = [line for line in messages if "analysis " in line]
+    # Nothing has been timed before the first analysis, so it carries no
+    # estimate -- a made-up one would be worse than none.
+    assert "left" not in analyses[0]
+    assert all("left" in line for line in analyses[1:]), analyses
+
+
+def test_nothing_overwrites_the_line_that_has_to_survive_the_analysis() -> None:
+    # The status is not repainted again until STAAD.Pro returns, so a second
+    # message posted between the count and the analysis would replace it with
+    # something that says nothing for the whole of the wait.
+    messages: list[str] = []
+    optimize_tapered_sections(FakeStaad(), settings(analysis_budget=12),
+                              progress=messages.append)
+
+    last_before_finishing = messages[:-1]      # the closing restore/apply line
+    assert all("analysis " in line for line in last_before_finishing), messages
+
+
+def test_the_estimate_shrinks_as_the_search_gets_through_the_budget() -> None:
+    clock = iter(range(0, 10_000, 30))         # every analysis takes 30s
+    progress = SearchProgress(10, report=(messages := []).append)
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(taper_optimizer, "monotonic", lambda: next(clock))
+        for _ in range(4):
+            progress.run(lambda _state: None, "Fine-tuning", None)  # type: ignore[arg-type]
+
+    assert "up to" not in messages[0]
+    assert "up to 5 min left" in messages[1]   # 9 left at 30s each
+    assert "up to 4 min left" in messages[2]
+    assert "up to 4 min left" in messages[3]   # 7 x 30s = 3.5 min, rounded
+
+
+def test_a_short_estimate_is_not_reported_as_zero_minutes() -> None:
+    clock = iter(range(0, 1000, 2))            # every analysis takes 2s
+    progress = SearchProgress(5, report=(messages := []).append)
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(taper_optimizer, "monotonic", lambda: next(clock))
+        for _ in range(3):
+            progress.run(lambda _state: None, "Fine-tuning", None)  # type: ignore[arg-type]
+
+    assert "up to under a minute left" in messages[-1]
+
+
+def test_a_long_estimate_is_reported_in_hours() -> None:
+    clock = iter(range(0, 1_000_000, 120))     # every analysis takes 2 min
+    progress = SearchProgress(100, report=(messages := []).append)
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(taper_optimizer, "monotonic", lambda: next(clock))
+        for _ in range(2):
+            progress.run(lambda _state: None, "Fine-tuning", None)  # type: ignore[arg-type]
+
+    assert "up to 3h 18 min left" in messages[-1]          # 99 x 2 min
 
 
 def test_a_run_that_stops_part_way_puts_the_original_sections_back() -> None:
