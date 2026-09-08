@@ -1,9 +1,9 @@
 """General-arrangement DXF renderer.
 
 Where the analytical export labels every member in place, a GA drawing marks
-each member with a bubbled number and collects the section descriptions into one
-MEMBER SIZE SCHEDULE beside the frame. Members sharing a section size and a
-material grade share a mark.
+each member with a bubbled number -- carrying its length -- and collects the
+section descriptions into one MEMBER SIZE SCHEDULE beside the frame. Members
+sharing a section size and a material grade share a mark.
 
 The model read and the geometry solve are shared with the analytical exporter --
 see :mod:`staad_ext.framing`.
@@ -12,7 +12,7 @@ see :mod:`staad_ext.framing`.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import hypot
+from math import atan2, degrees, hypot
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +35,7 @@ GA_LAYERS: tuple[tuple[str, int, str], ...] = (
 MARK_COLOR = 1        # red -- mark numbers, schedule title and headings
 DESCRIPTION_COLOR = 6  # magenta -- schedule descriptions and grades
 GRID_COLOR = 7        # white -- schedule rules and mark bubbles
+LENGTH_COLOR = 4      # cyan -- the member length written beside its bubble
 
 # Mark bubbles are drawn one size for the whole drawing, from the frame's
 # larger extent -- but that alone oversizes them on densely framed models, so
@@ -45,6 +46,10 @@ MARK_RADIUS_FACTOR = 0.009
 MARK_CLEARANCE_FACTOR = 0.34
 MIN_MARK_RADIUS_FACTOR = 0.0025
 MARK_LEADER_RADII = 2.2
+# The length is written past the far side of the bubble, as a share of the
+# bubble radius: text height, and the gap from the bubble to its baseline.
+MARK_LENGTH_HEIGHT = 0.8
+MARK_LENGTH_GAP = 0.35
 
 SCHEDULE_TITLE = "MEMBER SIZE SCHEDULE"
 SCHEDULE_HEADINGS = ("MARK", "DESCRIPTION", "GRADE")
@@ -196,6 +201,24 @@ def mark_radius(model: FramingModel, settings: GaExportSettings) -> float:
     return max(radius, extent * MIN_MARK_RADIUS_FACTOR) * settings.mark_scale
 
 
+def member_length_label(member: Member) -> str:
+    """Return the length written beside a member's mark, in mm."""
+    return f"L={_dim(member.length)}"
+
+
+def label_rotation(member: Member) -> float:
+    """Return the member's axis angle, folded so the text still reads left to right.
+
+    Folding by 180 degrees only reverses the reading direction along the axis;
+    the text's own "up" stays on :func:`mark_direction`'s side of the member,
+    which is where the bubble is, so the label always grows outwards.
+    """
+    angle = degrees(atan2(member.end.y - member.start.y, member.end.x - member.start.x))
+    if angle > 90.0:
+        return angle - 180.0
+    return angle + 180.0 if angle < -90.0 else angle
+
+
 def write_mark_bubble(writer: DxfWriter, member: Member, mark: int,
                       radius: float) -> None:
     """Draw a member's mark bubble, offset clear of the section with a leader."""
@@ -210,6 +233,14 @@ def write_mark_bubble(writer: DxfWriter, member: Member, mark: int,
     for direction in (-1.0, 1.0):
         writer.line("MARK_LEADERS", anchor, move(back, side, direction * head * 0.35))
     _bubble(writer, "MEMBER_MARKS", center, radius, str(mark))
+
+    # The length reads along the member on the far side of the bubble: that
+    # side is already clear of the frame, the leader and the outlines, so it is
+    # the least crowded ground a label can take.
+    height = radius * MARK_LENGTH_HEIGHT
+    writer.text("MEMBER_MARKS", move(center, unit, radius + height * MARK_LENGTH_GAP),
+                height, label_rotation(member), member_length_label(member),
+                LENGTH_COLOR)
 
 
 def _schedule_origin(model: FramingModel, settings: GaExportSettings,

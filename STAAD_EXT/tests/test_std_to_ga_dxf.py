@@ -1,5 +1,5 @@
 from io import StringIO
-from math import hypot
+from math import cos, hypot, radians, sin
 
 import pytest
 
@@ -7,8 +7,8 @@ from staad_ext.dxf import DxfWriter
 from staad_ext.framing import FramingModel, Member, move
 from staad_ext.macros.std_to_ga_dxf import (
     GA_LAYERS, MARK_LEADER_RADII, build_schedule, describe_section, export_ga_drawing,
-    mark_anchor, mark_direction, mark_radius, member_grade, write_mark_bubble,
-    write_schedule,
+    label_rotation, mark_anchor, mark_direction, mark_radius, member_grade,
+    member_length_label, write_mark_bubble, write_schedule,
 )
 from staad_ext.models import (
     GaExportSettings, Point3D, ScheduleCorner, SectionEnvelope, ViewPlane,
@@ -16,11 +16,11 @@ from staad_ext.models import (
 
 
 def make_member(number=1, property_type=675, values=None, name="TAPERED",
-                start=Point3D(0, 0), end=Point3D(0, 4), half_width=0.3):
+                start=Point3D(0, 0), end=Point3D(0, 4), half_width=0.3, length=4.0):
     envelope = SectionEnvelope(half_width, half_width, property_type)
     return Member(
         number=number, start=start, end=end, incidence=(number, number + 1),
-        length=4.0, envelope=envelope, name=name,
+        length=length, envelope=envelope, name=name,
         property_values=list(values or []),
         outline=[Point3D(-half_width, 0), Point3D(-half_width, 4),
                  Point3D(half_width, 0), Point3D(half_width, 4)],
@@ -185,6 +185,51 @@ def test_mark_bubble_draws_a_circle_a_leader_and_an_arrow_head() -> None:
     assert value.count("0\nCIRCLE") == 1
     assert value.count("8\nMARK_LEADERS") == 3       # one leader, two arrow barbs
     assert "\n1\n7\n" in value
+
+
+def texts_of(dxf: str) -> dict[str, tuple[Point3D, float, float]]:
+    """Map each TEXT entity's string to its (insertion point, height, rotation)."""
+    found = {}
+    for chunk in dxf.split("0\nTEXT\n")[1:]:
+        pairs = chunk.split("\n0\n")[0].split("\n")
+        codes = {pairs[index]: pairs[index + 1] for index in range(0, len(pairs) - 1, 2)}
+        found[codes["1"]] = (Point3D(float(codes["10"]), float(codes["20"])),
+                             float(codes["40"]), float(codes["50"]))
+    return found
+
+
+def test_the_mark_carries_the_members_true_length_in_mm() -> None:
+    assert member_length_label(make_member(length=6.0)) == "L=6000"
+    assert member_length_label(make_member(length=6.1234)) == "L=6123.4"
+
+
+def test_the_length_sits_past_the_far_side_of_the_bubble() -> None:
+    # Everything else -- the member, its leader, the neighbouring marks -- is on
+    # the near side, so the label is placed clear of all of it.
+    member, radius = make_member(), 0.3
+    stream = StringIO()
+    write_mark_bubble(DxfWriter(stream), member, 7, radius)
+    point, height, _ = texts_of(stream.getvalue())["L=4000"]
+
+    unit = mark_direction(member)
+    center = move(mark_anchor(member), unit, radius * MARK_LEADER_RADII)
+    outward = (point.x - center.x) * unit.x + (point.y - center.y) * unit.y
+    assert outward > radius
+    assert hypot(point.x - center.x, point.y - center.y) == pytest.approx(outward)
+    assert height == pytest.approx(radius * 0.8)
+
+
+@pytest.mark.parametrize("end", [Point3D(0, 4), Point3D(0, -4), Point3D(4, 0),
+                                 Point3D(-4, 0), Point3D(-3, -3), Point3D(3, -3)])
+def test_the_length_reads_left_to_right_and_grows_away_from_the_member(end) -> None:
+    member = make_member(start=Point3D(0, 0), end=end)
+    rotation = label_rotation(member)
+    assert -90.0 <= rotation <= 90.0
+    # Text grows along its own "up" (rotation + 90), which must be the side the
+    # bubble is on, or the label would be laid back over the member.
+    up = Point3D(-sin(radians(rotation)), cos(radians(rotation)))
+    unit = mark_direction(member)
+    assert up.x * unit.x + up.y * unit.y == pytest.approx(1.0)
 
 
 def test_export_writes_a_complete_dxf(tmp_path) -> None:
