@@ -69,15 +69,13 @@ class DxfWriter:
         self._pairs(*pairs)
 
     def envelope(self, layer: str, outline: Sequence[Point3D], open_start: bool = False,
-                 open_end: bool = False, color: int | None = None,
-                 hidden_fractions: Sequence[float] = (),
-                 hidden_layer: str | None = None) -> None:
+                 open_end: bool = False, color: int | None = None) -> None:
         """Draw a four-corner member envelope: two long edges plus optional caps.
 
         ``outline`` is ordered (start-side-A, end-side-A, start-side-B, end-side-B),
-        matching what the framing layer solves. ``hidden_fractions`` adds inner
-        HIDDEN lines interpolated across the section, used to suggest the far wall
-        of a hollow tube or pipe.
+        matching what the framing layer solves. The inner faces that give a
+        flange or a tube wall its thickness are drawn by the renderers, from
+        :func:`staad_ext.framing.inner_face_lines`.
         """
         p1, p2, p3, p4 = outline
         edges = [(p1, p2), (p3, p4)]
@@ -87,13 +85,6 @@ class DxfWriter:
             edges.append((p2, p4))
         for start, end in edges:
             self.line(layer, start, end, color=color)
-        for fraction in hidden_fractions:
-            self.line(
-                hidden_layer or layer,
-                Point3D(p1.x + (p3.x - p1.x) * fraction, p1.y + (p3.y - p1.y) * fraction),
-                Point3D(p2.x + (p4.x - p2.x) * fraction, p2.y + (p4.y - p2.y) * fraction),
-                "HIDDEN", color=color,
-            )
 
     def text(self, layer: str, point: Point3D, height: float, rotation: float,
              value: str, color: int, halign: int = 1) -> None:

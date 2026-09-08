@@ -36,6 +36,10 @@ class SectionEnvelope:
     start_half_width: float
     end_half_width: float
     property_type: int
+    # Flange thickness for an I section, wall thickness for a tube or pipe:
+    # what the drawn faces are given a thickness by. 0.0 when STAAD reports
+    # none, which leaves the member drawn as a plain outline.
+    wall_thickness: float = 0.0
 
 
 class ScheduleCorner(StrEnum):

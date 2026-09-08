@@ -18,6 +18,9 @@ from staad_ext.openstaad import OpenStaadError
 
 MIN_SECTION_HALF_WIDTH = 0.05
 TUBE_PIPE_TYPES = {650, 654, 655, 660, 675, 695, 696}
+# Two inner faces have to leave a web between them, so a thickness past this
+# share of the drawn depth is taken as one that does not belong to this view.
+MAX_INNER_FACE_SHARE = 0.4
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,6 +154,27 @@ def _envelope_from_values(property_type: int, values: list[float], default: floa
     return half, half
 
 
+def _thickness_from_values(property_type: int, values: list[float]) -> float:
+    """Return the flange or wall thickness a section's property values carry.
+
+    Only the built-up and hollow types are read here -- they are the ones whose
+    values array has a documented layout. Everything else falls back on the
+    Tf/Tw pair :func:`member_envelope` reads from the property table.
+    """
+    v = [abs(value) for value in values]
+    if property_type == 675:
+        return v[7]
+    if property_type == 680:
+        return max(v[4], v[6])
+    if property_type in {650, 654, 696}:
+        return v[3]
+    if property_type in {660, 655}:
+        return v[2]
+    if property_type == 695:
+        return max(v[1] - v[2], 0.0) / 2
+    return 0.0
+
+
 def read_property_values(staad: Any, beam_no: int) -> tuple[int, list[float]]:
     """Read a beam's raw section property values once, tolerating COM failures.
 
@@ -169,11 +193,13 @@ def member_envelope(staad: Any, beam_no: int, length: float,
                     section: tuple[int, list[float]] | None = None) -> SectionEnvelope:
     default = max(length * 0.0125, MIN_SECTION_HALF_WIDTH)
     start = end = default
+    thickness = 0.0
     try:
-        width, depth, *_ = staad.beam_property_all(beam_no)
+        width, depth, *_, tf, tw = staad.beam_property_all(beam_no)
         candidate = max(width, depth) / 2
         if candidate > 0:
             start = end = max(candidate, MIN_SECTION_HALF_WIDTH)
+        thickness = max(abs(tf), abs(tw))
     except (OSError, TypeError, ValueError):
         pass
     property_type, values = section if section is not None else read_property_values(staad, beam_no)
@@ -182,7 +208,11 @@ def member_envelope(staad: Any, beam_no: int, length: float,
             start, end = _envelope_from_values(property_type, values, start)
         except (IndexError, TypeError, ValueError):
             pass
-    return SectionEnvelope(start, end, property_type)
+        try:
+            thickness = _thickness_from_values(property_type, values) or thickness
+        except (IndexError, TypeError, ValueError):
+            pass
+    return SectionEnvelope(start, end, property_type, thickness)
 
 
 def tube_pipe_name(staad: Any, beam_no: int, envelope: SectionEnvelope, name: str,
@@ -238,6 +268,35 @@ def envelope_points(start: Point3D, end: Point3D, envelope: SectionEnvelope,
         p1, p2 = move(start, unit, envelope.start_half_width), move(end, unit, envelope.end_half_width)
         p3, p4 = move(start, unit, -envelope.start_half_width), move(end, unit, -envelope.end_half_width)
     return [p1, p2, p3, p4]
+
+
+def _inset_edge(first: Point3D, second: Point3D, toward: Point3D,
+                thickness: float) -> tuple[Point3D, Point3D]:
+    """Return an envelope edge shifted ``thickness`` towards the far edge."""
+    unit = offset_vector(first, second)
+    if (toward.x - first.x) * unit.x + (toward.y - first.y) * unit.y < 0:
+        unit = Point3D(-unit.x, -unit.y)
+    return move(first, unit, thickness), move(second, unit, thickness)
+
+
+def inner_face_lines(outline: list[Point3D], thickness: float) -> list[tuple[Point3D, Point3D]]:
+    """Return the two lines that give a member's faces a drawn thickness.
+
+    Each long edge is offset inwards by ``thickness``, so an I section reads as
+    a flange top and bottom and a hollow section as its two walls. The offset
+    follows each edge rather than a share of the depth, which keeps the flange
+    of a tapered member a constant thickness along the sloping face.
+
+    Nothing is returned when the thickness cannot be believed against the drawn
+    depth -- the depth here is the projected one, so a section shown on its weak
+    axis, or one STAAD reports no usable Tf/Tw for, is left as a plain outline
+    rather than drawn with faces that would cross.
+    """
+    p1, p2, p3, p4 = outline
+    depth = min(hypot(p3.x - p1.x, p3.y - p1.y), hypot(p4.x - p2.x, p4.y - p2.y))
+    if thickness <= 0 or thickness > depth * MAX_INNER_FACE_SHARE:
+        return []
+    return [_inset_edge(p1, p2, p3, thickness), _inset_edge(p3, p4, p1, thickness)]
 
 
 def line_intersection(a: Point3D, b: Point3D, c: Point3D, d: Point3D) -> Point3D | None:
