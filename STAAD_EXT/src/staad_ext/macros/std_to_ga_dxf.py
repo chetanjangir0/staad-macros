@@ -202,8 +202,8 @@ def mark_radius(model: FramingModel, settings: GaExportSettings) -> float:
 
 
 def member_length_label(member: Member) -> str:
-    """Return the length written beside a member's mark, in mm."""
-    return f"L={_dim(member.length)}"
+    """Return the length written beside a member's mark, in metres."""
+    return f"L={abs(member.length):.2f}m"
 
 
 def label_rotation(member: Member) -> float:

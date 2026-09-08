@@ -198,9 +198,9 @@ def texts_of(dxf: str) -> dict[str, tuple[Point3D, float, float]]:
     return found
 
 
-def test_the_mark_carries_the_members_true_length_in_mm() -> None:
-    assert member_length_label(make_member(length=6.0)) == "L=6000"
-    assert member_length_label(make_member(length=6.1234)) == "L=6123.4"
+def test_the_mark_carries_the_members_true_length_in_metres() -> None:
+    assert member_length_label(make_member(length=6.0)) == "L=6.00m"
+    assert member_length_label(make_member(length=6.1234)) == "L=6.12m"
 
 
 def test_the_length_sits_past_the_far_side_of_the_bubble() -> None:
@@ -209,7 +209,7 @@ def test_the_length_sits_past_the_far_side_of_the_bubble() -> None:
     member, radius = make_member(), 0.3
     stream = StringIO()
     write_mark_bubble(DxfWriter(stream), member, 7, radius)
-    point, height, _ = texts_of(stream.getvalue())["L=4000"]
+    point, height, _ = texts_of(stream.getvalue())["L=4.00m"]
 
     unit = mark_direction(member)
     center = move(mark_anchor(member), unit, radius * MARK_LEADER_RADII)
