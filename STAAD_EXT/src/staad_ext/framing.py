@@ -270,6 +270,15 @@ def envelope_points(start: Point3D, end: Point3D, envelope: SectionEnvelope,
     return [p1, p2, p3, p4]
 
 
+def inner_faces_are_hidden(envelope: SectionEnvelope, name: str) -> bool:
+    """True when a section's inner faces sit behind its own front wall.
+
+    A hollow section's walls are seen through the near face, so both drawings
+    show them as hidden lines; a flange's inner face is an edge you would see.
+    """
+    return is_tube_or_pipe(envelope.property_type, name) and not is_tapered(envelope, name)
+
+
 def _inset_edge(first: Point3D, second: Point3D, toward: Point3D,
                 thickness: float) -> tuple[Point3D, Point3D]:
     """Return an envelope edge shifted ``thickness`` towards the far edge."""

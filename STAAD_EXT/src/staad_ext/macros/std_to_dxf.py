@@ -12,8 +12,8 @@ from pathlib import Path
 from staad_ext.dxf import DxfWriter, dxf_document
 from staad_ext.framing import (
     FramingModel, Member, build_framing_model, index_groups, inner_face_lines,
-    is_column, is_tapered, is_tube_or_pipe, line_intersection, move,
-    offset_vector, rafter_rises_to_joint,
+    inner_faces_are_hidden, is_column, is_tapered, is_tube_or_pipe,
+    line_intersection, move, offset_vector, rafter_rises_to_joint,
 )
 from staad_ext.models import ExportSettings, Point3D, SectionEnvelope
 
@@ -88,9 +88,8 @@ def write_member_envelope(writer: DxfWriter, outline: list[Point3D], envelope: S
     layer = "TAPERED_SECTION" if tapered else ("TUBE_PIPE_SECTION" if tube else "MEMBER_SECTION")
     writer.envelope(layer, outline, open_start, open_end, color)
     # Give the flanges -- or a hollow section's walls -- their real thickness
-    # instead of a single face line. A tube's inner faces are behind its front
-    # wall, so those stay HIDDEN; a flange's are edges you would see.
-    kind = "HIDDEN" if tube and not tapered else "CONTINUOUS"
+    # instead of a single face line.
+    kind = "HIDDEN" if inner_faces_are_hidden(envelope, name) else "CONTINUOUS"
     for first, second in inner_face_lines(outline, envelope.wall_thickness):
         writer.line(layer, first, second, kind, color=color)
 

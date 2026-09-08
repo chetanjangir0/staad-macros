@@ -8,7 +8,7 @@ from staad_ext.framing import FramingModel, Member, move
 from staad_ext.macros.std_to_ga_dxf import (
     GA_LAYERS, MARK_LEADER_RADII, build_schedule, describe_section, export_ga_drawing,
     label_rotation, mark_anchor, mark_direction, mark_radius, member_grade,
-    member_length_label, write_mark_bubble, write_schedule,
+    member_length_label, write_inner_faces, write_mark_bubble, write_schedule,
 )
 from staad_ext.models import (
     GaExportSettings, Point3D, ScheduleCorner, SectionEnvelope, ViewPlane,
@@ -16,8 +16,9 @@ from staad_ext.models import (
 
 
 def make_member(number=1, property_type=675, values=None, name="TAPERED",
-                start=Point3D(0, 0), end=Point3D(0, 4), half_width=0.3, length=4.0):
-    envelope = SectionEnvelope(half_width, half_width, property_type)
+                start=Point3D(0, 0), end=Point3D(0, 4), half_width=0.3, length=4.0,
+                thickness=0.0):
+    envelope = SectionEnvelope(half_width, half_width, property_type, thickness)
     return Member(
         number=number, start=start, end=end, incidence=(number, number + 1),
         length=length, envelope=envelope, name=name,
@@ -232,6 +233,30 @@ def test_the_length_reads_left_to_right_and_grows_away_from_the_member(end) -> N
     assert up.x * unit.x + up.y * unit.y == pytest.approx(1.0)
 
 
+def inner_faces_dxf(property_type, name, thickness) -> str:
+    stream = StringIO()
+    write_inner_faces(DxfWriter(stream), make_member(
+        property_type=property_type, name=name, thickness=thickness,
+    ))
+    return stream.getvalue()
+
+
+def test_a_flange_is_drawn_as_a_visible_face_inside_the_outline() -> None:
+    value = inner_faces_dxf(612, "ISMB400", 0.016)
+    assert value.count("8\nMEMBER_OUTLINE") == 2
+    assert "HIDDEN" not in value
+    # The outline runs to +/-0.3, so a 16mm flange sits just inside it.
+    assert "10\n-0.284000" in value and "10\n0.284000" in value
+
+
+def test_a_tubes_walls_are_drawn_hidden_behind_its_front_face() -> None:
+    assert inner_faces_dxf(650, "TUB40030016", 0.016).count("6\nHIDDEN") == 2
+
+
+def test_a_member_without_a_thickness_stays_a_plain_outline() -> None:
+    assert inner_faces_dxf(675, "TAPERED", 0.0) == ""
+
+
 def test_export_writes_a_complete_dxf(tmp_path) -> None:
     class ExportStaad(FakeStaad):
         def selected_beams(self):
@@ -265,6 +290,19 @@ def test_export_writes_a_complete_dxf(tmp_path) -> None:
     assert "W=616~366x5/F=150x8" in value
     # Both members are one size and grade, so the schedule carries a single mark.
     assert value.count("MEMBER SIZE SCHEDULE") == 1
+
+    class NoThicknessStaad(ExportStaad):
+        def beam_property_all(self, beam_no):
+            raise OSError("no property table")
+
+        def section_property_values(self, beam_no):
+            return 0, []
+
+    plain = tmp_path / "plain.dxf"
+    export_ga_drawing(NoThicknessStaad(), plain, GaExportSettings())
+    # Two flange faces per member, on top of whatever the outlines already draw.
+    assert (value.count("8\nMEMBER_OUTLINE")
+            == plain.read_text().count("8\nMEMBER_OUTLINE") + 4)
 
 
 def test_export_returns_zero_without_a_selection(tmp_path) -> None:

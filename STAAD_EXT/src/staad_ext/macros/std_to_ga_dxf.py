@@ -18,7 +18,8 @@ from typing import Any
 
 from staad_ext.dxf import DxfWriter, dxf_document
 from staad_ext.framing import (
-    FramingModel, Member, build_framing_model, index_groups, move, offset_vector,
+    FramingModel, Member, build_framing_model, index_groups, inner_face_lines,
+    inner_faces_are_hidden, move, offset_vector,
 )
 from staad_ext.models import GaExportSettings, Point3D, ScheduleCorner
 
@@ -201,6 +202,13 @@ def mark_radius(model: FramingModel, settings: GaExportSettings) -> float:
     return max(radius, extent * MIN_MARK_RADIUS_FACTOR) * settings.mark_scale
 
 
+def write_inner_faces(writer: DxfWriter, member: Member) -> None:
+    """Draw the member's flange -- or hollow wall -- thickness inside its outline."""
+    kind = "HIDDEN" if inner_faces_are_hidden(member.envelope, member.name) else "CONTINUOUS"
+    for first, second in inner_face_lines(member.outline, member.envelope.wall_thickness):
+        writer.line("MEMBER_OUTLINE", first, second, kind)
+
+
 def member_length_label(member: Member) -> str:
     """Return the length written beside a member's mark, in metres."""
     return f"L={abs(member.length):.2f}m"
@@ -327,6 +335,7 @@ def export_ga_drawing(staad: Any, output: Path, settings: GaExportSettings) -> i
                 (member.number, 0) in model.open_ends,
                 (member.number, 1) in model.open_ends,
             )
+            write_inner_faces(writer, member)
             if settings.write_marks:
                 write_mark_bubble(writer, member, marks[member.number], radius)
         write_schedule(writer, model, entries, settings)
