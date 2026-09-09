@@ -17,6 +17,16 @@ class Point3D:
     z: float = 0.0
 
 
+# STAAD reports geometry in metres; drawings are dimensioned in millimetres, so
+# the exporters multiply every length by this before writing it out.
+MILLIMETRES_PER_METRE = 1000.0
+
+
+def drawing_scale(millimetre_units: bool) -> float:
+    """Return the model-to-drawing length scale for a units choice."""
+    return MILLIMETRES_PER_METRE if millimetre_units else 1.0
+
+
 @dataclass(frozen=True, slots=True)
 class ExportSettings:
     plane: ViewPlane = ViewPlane.XY
@@ -25,10 +35,16 @@ class ExportSettings:
     peb_corner_joins: bool = False
     connection_face_lines: bool = False
     color_by_section: bool = True
+    # On by default: a DXF measured in millimetres is what a detailer expects.
+    millimetre_units: bool = True
 
     def __post_init__(self) -> None:
         if not 0.1 <= self.text_scale <= 10.0:
             raise ValueError("text_scale must be between 0.1 and 10.0")
+
+    @property
+    def scale(self) -> float:
+        return drawing_scale(self.millimetre_units)
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,6 +84,8 @@ class GaExportSettings:
     # kept off text_scale: shrinking crowded bubbles must not shrink the
     # schedule along with them.
     mark_scale: float = 1.0
+    # On by default: a DXF measured in millimetres is what a detailer expects.
+    millimetre_units: bool = True
 
     def __post_init__(self) -> None:
         if not 0.1 <= self.text_scale <= 10.0:
@@ -76,6 +94,10 @@ class GaExportSettings:
             raise ValueError("mark_scale must be between 0.1 and 10.0")
         if not 0 <= self.blank_rows <= 40:
             raise ValueError("blank_rows must be between 0 and 40")
+
+    @property
+    def scale(self) -> float:
+        return drawing_scale(self.millimetre_units)
 
 
 @dataclass(frozen=True, slots=True)

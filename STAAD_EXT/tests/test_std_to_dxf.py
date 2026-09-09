@@ -10,7 +10,7 @@ from staad_ext.framing import (
 from staad_ext.macros.std_to_dxf import (
     write_connection_face_lines, write_member_envelope,
 )
-from staad_ext.models import Point3D, SectionEnvelope, ViewPlane
+from staad_ext.models import ExportSettings, Point3D, SectionEnvelope, ViewPlane
 
 
 def test_projection_planes() -> None:
@@ -33,6 +33,33 @@ def test_dxf_has_valid_sections_and_eof() -> None:
     value = stream.getvalue()
     assert "SECTION\n2\nENTITIES" in value
     assert value.endswith("0\nEOF\n")
+
+
+def test_a_millimetre_drawing_scales_every_length_but_not_the_angles() -> None:
+    stream = StringIO()
+    writer = DxfWriter(stream, ExportSettings().scale)
+    writer.header()
+    writer.line("MEMBER_CENTERLINE", Point3D(0, 0), Point3D(6, 0), "DASHED")
+    writer.circle("MEMBER_MARKS", Point3D(1.5, 0), 0.25)
+    writer.text("MEMBER_LABELS", Point3D(1.5, 0), 0.1, 45.0, "L=6.00m", 7)
+    value = stream.getvalue()
+    assert "9\n$INSUNITS\n70\n4" in value
+    assert "11\n6000.000000" in value          # the line's far end
+    assert "40\n250.000000" in value           # the circle radius
+    assert "40\n100.000000" in value           # the text height
+    assert "50\n45.000000" in value            # the rotation, left in degrees
+    assert "49\n500.000000" in value           # the DASHED pattern's dash
+
+
+def test_a_metre_drawing_leaves_the_model_units_alone() -> None:
+    stream = StringIO()
+    writer = DxfWriter(stream, ExportSettings(millimetre_units=False).scale)
+    writer.header()
+    writer.line("MEMBER_CENTERLINE", Point3D(0, 0), Point3D(6, 0), "DASHED")
+    value = stream.getvalue()
+    assert "9\n$INSUNITS\n70\n6" in value
+    assert "11\n6.000000" in value
+    assert "49\n0.500000" in value
 
 
 def test_peb_corner_join_extends_rafter_edges_to_column_flange_lines() -> None:

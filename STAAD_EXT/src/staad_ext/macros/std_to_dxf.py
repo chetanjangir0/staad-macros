@@ -287,7 +287,7 @@ def export_selected_members(staad, output: Path, settings: ExportSettings) -> in
     if not model:
         return 0
     section_colors = assign_section_colors(model) if settings.color_by_section else {}
-    with dxf_document(output) as writer:
+    with dxf_document(output, scale=settings.scale) as writer:
         for member in model.members.values():
             color = section_colors.get(member.number)
             writer.line("MEMBER_CENTERLINE", member.start, member.end, "DASHED")

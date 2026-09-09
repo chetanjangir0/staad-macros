@@ -481,6 +481,7 @@ class StaadExtApplication:
         self.dxf_peb_joins = tk.BooleanVar(value=False)
         self.dxf_connection_faces = tk.BooleanVar(value=False)
         self.dxf_color_by_section = tk.BooleanVar(value=True)
+        self.dxf_millimetres = tk.BooleanVar(value=True)
         self.dxf_scale = tk.StringVar(value="1.0")
 
         self._field_label(panel, "OUTPUT FILE", 0)
@@ -521,6 +522,9 @@ class StaadExtApplication:
         ).pack(anchor="w", pady=(0, 5))
         self._dark_check(
             checks, "Color members by section size", self.dxf_color_by_section
+        ).pack(anchor="w", pady=(0, 5))
+        self._dark_check(
+            checks, "Draw in millimetres (off: metres)", self.dxf_millimetres
         ).pack(anchor="w")
         self._primary_button(panel, "Export selected members", self._export_dxf).grid(
             row=4, column=0, sticky="w")
@@ -588,6 +592,7 @@ class StaadExtApplication:
                 self.dxf_peb_joins.get(),
                 self.dxf_connection_faces.get(),
                 self.dxf_color_by_section.get(),
+                self.dxf_millimetres.get(),
             )
             count = export_selected_members(OpenStaad.connect(), output, settings)
             if count:
@@ -616,6 +621,7 @@ class StaadExtApplication:
         self.ga_blank_rows = tk.StringVar(value="4")
         self.ga_marks = tk.BooleanVar(value=True)
         self.ga_centerlines = tk.BooleanVar(value=True)
+        self.ga_millimetres = tk.BooleanVar(value=True)
 
         self._field_label(panel, "OUTPUT FILE", 0)
         path_row = tk.Frame(panel, bg=self.PANEL)
@@ -675,6 +681,9 @@ class StaadExtApplication:
             anchor="w")
         self._dark_check(checks, "Draw member centerlines", self.ga_centerlines).pack(
             anchor="w", pady=(5, 0))
+        self._dark_check(
+            checks, "Draw in millimetres (off: metres)", self.ga_millimetres
+        ).pack(anchor="w", pady=(5, 0))
 
         self._primary_button(panel, "Export GA drawing", self._export_ga_dxf).grid(
             row=5, column=0, sticky="w")
@@ -707,6 +716,7 @@ class StaadExtApplication:
                 write_marks=self.ga_marks.get(),
                 write_centerlines=self.ga_centerlines.get(),
                 mark_scale=float(self.ga_mark_scale.get()),
+                millimetre_units=self.ga_millimetres.get(),
             )
             count = export_ga_drawing(OpenStaad.connect(), output, settings)
             if count:

@@ -326,7 +326,7 @@ def export_ga_drawing(staad: Any, output: Path, settings: GaExportSettings) -> i
     marks, entries = build_schedule(staad, model)
     radius = mark_radius(model, settings)
 
-    with dxf_document(output, GA_LAYERS) as writer:
+    with dxf_document(output, GA_LAYERS, settings.scale) as writer:
         for member in model.members.values():
             if settings.write_centerlines:
                 writer.line("MEMBER_CENTERLINE", member.start, member.end, "DASHED")

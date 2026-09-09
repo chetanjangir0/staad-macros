@@ -291,6 +291,19 @@ def test_export_writes_a_complete_dxf(tmp_path) -> None:
     # Both members are one size and grade, so the schedule carries a single mark.
     assert value.count("MEMBER SIZE SCHEDULE") == 1
 
+    # A GA drawing is dimensioned in millimetres by default: the 6m column
+    # reaches y=6000, while its length label still reads in metres.
+    assert "9\n$INSUNITS\n70\n4" in value
+    assert "20\n6000.000000" in value
+    assert "L=6.00m" in value
+
+    metres = tmp_path / "metres.dxf"
+    export_ga_drawing(ExportStaad(), metres, GaExportSettings(millimetre_units=False))
+    in_metres = metres.read_text()
+    assert "9\n$INSUNITS\n70\n6" in in_metres
+    assert "20\n6.000000" in in_metres
+    assert "L=6.00m" in in_metres
+
     class NoThicknessStaad(ExportStaad):
         def beam_property_all(self, beam_no):
             raise OSError("no property table")
