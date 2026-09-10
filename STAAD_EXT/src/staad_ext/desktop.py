@@ -333,40 +333,14 @@ class StaadExtApplication:
         footer = tk.Frame(sidebar, bg=self.SIDEBAR)
         footer.pack(side="bottom", fill="x", padx=20, pady=20)
 
-        support_card = tk.Frame(footer, bg=self.PANEL_ALT)
-        support_card.pack(fill="x", pady=(0, 16))
-        tk.Label(
-            support_card, text="❤  Enjoying this free tool?",
-            bg=self.PANEL_ALT, fg=self.TEXT, font=("Segoe UI", 9, "bold"),
-        ).pack(anchor="w", padx=14, pady=(12, 2))
-        tk.Label(
-            support_card, text="A small tip keeps it maintained.",
-            bg=self.PANEL_ALT, fg=self.MUTED, font=("Segoe UI", 8),
-        ).pack(anchor="w", padx=14, pady=(0, 10))
-        support_button = tk.Button(
-            support_card, text="Support Development",
-            command=self._open_support_link,
-            bg=self.SUPPORT, fg="white",
-            activebackground=self.SUPPORT_HOVER, activeforeground="white",
-            relief="flat", bd=0, cursor="hand2",
-            font=("Segoe UI", 9, "bold"), padx=10, pady=8,
-        )
-        support_button.pack(fill="x", padx=14, pady=(0, 14))
-        support_button.bind(
-            "<Enter>", lambda _e: support_button.configure(bg=self.SUPPORT_HOVER)
-        )
-        support_button.bind(
-            "<Leave>", lambda _e: support_button.configure(bg=self.SUPPORT)
-        )
-
-        tk.Frame(footer, bg=self.BORDER, height=1).pack(fill="x", pady=(0, 15))
+        tk.Frame(footer, bg=self.BORDER, height=1).pack(fill="x", pady=(0, 12))
         logo_path = _get_asset_path("apollo_innovatione_logo.png")
         if logo_path.exists():
             try:
                 self._footer_logo = tk.PhotoImage(file=str(logo_path)).subsample(3, 3)
                 tk.Label(
                     footer, image=self._footer_logo, bg=self.SIDEBAR, bd=0
-                ).pack(anchor="center", pady=(2, 4))
+                ).pack(anchor="center", pady=(0, 4))
             except Exception:
                 pass
         else:
@@ -383,7 +357,7 @@ class StaadExtApplication:
             padx=10,
             pady=7,
         )
-        credits_card.pack(fill="x", pady=(8, 0))
+        credits_card.pack(fill="x", pady=(6, 10))
 
         for role, name in (("DEV", "Chetan Jangir"), ("LEAD", "Gundeep Singh")):
             row = tk.Frame(credits_card, bg=self.PANEL)
@@ -406,6 +380,35 @@ class StaadExtApplication:
                 fg=self.TEXT,
                 font=("Segoe UI", 8),
             ).pack(side="left")
+
+        support_button = tk.Button(
+            footer,
+            text="❤  Support Development",
+            command=self._open_support_link,
+            bg=self.SUPPORT,
+            fg=self.MUTED,
+            activebackground=self.SUPPORT_HOVER,
+            activeforeground="white",
+            relief="flat",
+            bd=0,
+            cursor="hand2",
+            font=("Segoe UI", 8, "bold"),
+            padx=10,
+            pady=7,
+        )
+        support_button.pack(fill="x")
+        support_button.bind(
+            "<Enter>",
+            lambda _e: support_button.configure(
+                bg=self.SUPPORT_HOVER, fg="white"
+            ),
+        )
+        support_button.bind(
+            "<Leave>",
+            lambda _e: support_button.configure(
+                bg=self.SUPPORT, fg=self.MUTED
+            ),
+        )
 
         self.content = tk.Frame(content_column, bg=self.BG)
         self.content.grid(row=0, column=0, sticky="nsew", padx=34, pady=(28, 18))
