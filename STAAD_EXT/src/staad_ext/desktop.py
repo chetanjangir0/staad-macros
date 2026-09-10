@@ -366,7 +366,7 @@ class StaadExtApplication:
                 self._footer_logo = tk.PhotoImage(file=str(logo_path)).subsample(3, 3)
                 tk.Label(
                     footer, image=self._footer_logo, bg=self.SIDEBAR, bd=0
-                ).pack(anchor="center", pady=(4, 0))
+                ).pack(anchor="center", pady=(2, 4))
             except Exception:
                 pass
         else:
@@ -374,11 +374,38 @@ class StaadExtApplication:
                 footer, text="STAAD.Pro 2025", bg=self.SIDEBAR, fg=self.MUTED,
                 font=("Segoe UI", 9),
             ).pack(anchor="w")
+
+        credits_card = tk.Frame(
+            footer,
+            bg=self.PANEL,
+            highlightbackground=self.BORDER,
+            highlightthickness=1,
+            padx=10,
+            pady=7,
+        )
+        credits_card.pack(fill="x", pady=(8, 0))
+
+        for role, name in (("DEV", "Chetan Jangir"), ("LEAD", "Gundeep Singh")):
+            row = tk.Frame(credits_card, bg=self.PANEL)
+            row.pack(fill="x", pady=2)
             tk.Label(
-                footer, text="Select members before running a utility",
-                bg=self.SIDEBAR, fg="#64748b", font=("Segoe UI", 8),
-                wraplength=190, justify="left",
-            ).pack(anchor="w", pady=(4, 0))
+                row,
+                text=role,
+                bg="#1e293b",
+                fg="#38bdf8",
+                font=("Segoe UI", 7, "bold"),
+                width=5,
+                anchor="center",
+                padx=2,
+                pady=1,
+            ).pack(side="left", padx=(0, 8))
+            tk.Label(
+                row,
+                text=name,
+                bg=self.PANEL,
+                fg=self.TEXT,
+                font=("Segoe UI", 8),
+            ).pack(side="left")
 
         self.content = tk.Frame(content_column, bg=self.BG)
         self.content.grid(row=0, column=0, sticky="nsew", padx=34, pady=(28, 18))
