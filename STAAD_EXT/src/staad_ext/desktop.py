@@ -1850,15 +1850,21 @@ class StaadExtApplication:
 
         action_frame = tk.Frame(right_panel, bg=self.PANEL)
         action_frame.grid(row=3, column=0, sticky="ew")
-        self._primary_button(action_frame, "Send to Active STAAD.Pro", self._send_frame_to_openstaad).pack(
+        self._primary_button(action_frame, "Copy File Contents", self._copy_frame_std_file).pack(
             side="left", padx=(0, 10)
         )
         self._secondary_button(action_frame, "Save .STD File...", self._save_frame_std_file).pack(
             side="left", padx=(0, 10)
         )
-        self._secondary_button(action_frame, "Copy File Contents", self._copy_frame_std_file).pack(
-            side="left"
+        send_btn = self._secondary_button(
+            action_frame, "Send to Active STAAD.Pro (Experimental)", lambda: None
         )
+        send_btn.configure(
+            state="disabled",
+            disabledforeground=self.MUTED,
+            cursor="arrow",
+        )
+        send_btn.pack(side="left")
 
         self._redraw_frame_canvas()
 
