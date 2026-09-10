@@ -383,10 +383,10 @@ class StaadExtApplication:
 
         support_button = tk.Button(
             footer,
-            text="❤  Support Development",
+            text="♥  Support Development",
             command=self._open_support_link,
             bg=self.SUPPORT,
-            fg=self.MUTED,
+            fg=self.TEXT,
             activebackground=self.SUPPORT_HOVER,
             activeforeground="white",
             relief="flat",
@@ -406,7 +406,7 @@ class StaadExtApplication:
         support_button.bind(
             "<Leave>",
             lambda _e: support_button.configure(
-                bg=self.SUPPORT, fg=self.MUTED
+                bg=self.SUPPORT, fg=self.TEXT
             ),
         )
 
