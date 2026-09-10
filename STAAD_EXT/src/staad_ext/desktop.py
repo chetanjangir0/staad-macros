@@ -5,6 +5,7 @@ from datetime import datetime
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tkinter as tk
 import webbrowser
 from tkinter import filedialog, messagebox, ttk
@@ -50,6 +51,14 @@ from staad_ext.models import (
     ScheduleCorner, TaperOptimizerSettings, ViewPlane,
 )
 from staad_ext.openstaad import OpenStaad, OpenStaadError
+
+
+def _get_asset_path(filename: str) -> Path:
+    if getattr(sys, "frozen", False):
+        base = Path(sys._MEIPASS) / "staad_ext" / "assets"
+    else:
+        base = Path(__file__).resolve().parent / "assets"
+    return base / filename
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,6 +192,7 @@ class StaadExtApplication:
         self._status_text = tk.StringVar(value="Ready")
         self._status_kind = "muted"
         self.recent_outputs: list[DeliverableRecord] = []
+        self._footer_logo: tk.PhotoImage | None = None
         self._configure_styles()
         self._build_shell()
         self.show_view("dashboard")
@@ -350,15 +360,26 @@ class StaadExtApplication:
         )
 
         tk.Frame(footer, bg=self.BORDER, height=1).pack(fill="x", pady=(0, 15))
-        tk.Label(
-            footer, text="STAAD.Pro 2025", bg=self.SIDEBAR, fg=self.MUTED,
-            font=("Segoe UI", 9),
-        ).pack(anchor="w")
-        tk.Label(
-            footer, text="Select members before running a utility",
-            bg=self.SIDEBAR, fg="#64748b", font=("Segoe UI", 8),
-            wraplength=190, justify="left",
-        ).pack(anchor="w", pady=(4, 0))
+        logo_path = _get_asset_path("apollo_innovatione_logo.png")
+        if logo_path.exists():
+            try:
+                self._footer_logo = tk.PhotoImage(file=str(logo_path)).subsample(3, 3)
+                tk.Label(
+                    footer, image=self._footer_logo, bg=self.SIDEBAR, bd=0
+                ).pack(anchor="center", pady=(4, 0))
+                self.root.iconphoto(True, self._footer_logo)
+            except Exception:
+                pass
+        else:
+            tk.Label(
+                footer, text="STAAD.Pro 2025", bg=self.SIDEBAR, fg=self.MUTED,
+                font=("Segoe UI", 9),
+            ).pack(anchor="w")
+            tk.Label(
+                footer, text="Select members before running a utility",
+                bg=self.SIDEBAR, fg="#64748b", font=("Segoe UI", 8),
+                wraplength=190, justify="left",
+            ).pack(anchor="w", pady=(4, 0))
 
         self.content = tk.Frame(content_column, bg=self.BG)
         self.content.grid(row=0, column=0, sticky="nsew", padx=34, pady=(28, 18))
