@@ -367,7 +367,6 @@ class StaadExtApplication:
                 tk.Label(
                     footer, image=self._footer_logo, bg=self.SIDEBAR, bd=0
                 ).pack(anchor="center", pady=(4, 0))
-                self.root.iconphoto(True, self._footer_logo)
             except Exception:
                 pass
         else:
