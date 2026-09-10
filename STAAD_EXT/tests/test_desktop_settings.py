@@ -66,3 +66,53 @@ def test_the_taper_checkboxes_are_off_unless_the_panel_ticks_them() -> None:
     assert settings.tie_depths_at_all_shared_nodes is False
     assert settings.prismatic_columns is False
     assert settings.apply_to_model is False
+
+
+def test_deliverable_record_and_recent_outputs_tracking() -> None:
+    from pathlib import Path
+    from staad_ext.desktop import DeliverableRecord
+
+    app = SimpleNamespace(recent_outputs=[])
+    StaadExtApplication._record_output(app, "STD to DXF", Path("sample.dxf"))
+
+    assert len(app.recent_outputs) == 1
+    rec = app.recent_outputs[0]
+    assert isinstance(rec, DeliverableRecord)
+    assert rec.label == "STD to DXF"
+    assert rec.file_path == Path("sample.dxf")
+    assert rec.status == "Completed"
+
+
+def test_model_telemetry_disconnected_graceful_state() -> None:
+    from staad_ext.desktop import ModelTelemetry
+
+    telemetry = ModelTelemetry(
+        connected=False,
+        model_name="No Active Model",
+        model_path=None,
+        base_unit_str="Unknown",
+        member_count=0,
+        node_count=0,
+        support_count=0,
+        primary_cases=0,
+        combo_cases=0,
+        results_available=False,
+        selected_count=0,
+        selected_length=0.0,
+        selected_sections={},
+    )
+    assert telemetry.connected is False
+    assert telemetry.member_count == 0
+    assert telemetry.selected_count == 0
+
+
+def test_query_model_telemetry_graceful_when_staad_absent() -> None:
+    app = SimpleNamespace()
+    telemetry = StaadExtApplication._query_model_telemetry(app)
+    assert isinstance(telemetry.connected, bool)
+    if not telemetry.connected:
+        assert telemetry.model_path is None
+        assert telemetry.member_count == 0
+        assert telemetry.selected_count == 0
+
+

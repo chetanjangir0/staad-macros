@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
+import os
 from pathlib import Path
+import subprocess
 import tkinter as tk
 import webbrowser
 from tkinter import filedialog, messagebox, ttk
@@ -56,6 +59,32 @@ class UtilityView:
     short_title: str
     description: str
     builder_name: str
+
+
+@dataclass(frozen=True, slots=True)
+class DeliverableRecord:
+    timestamp: str
+    label: str
+    file_path: Path
+    status: str = "Completed"
+
+
+@dataclass(frozen=True, slots=True)
+class ModelTelemetry:
+    connected: bool
+    model_name: str
+    model_path: Path | None
+    base_unit_str: str
+    member_count: int
+    node_count: int
+    support_count: int
+    primary_cases: int
+    combo_cases: int
+    results_available: bool
+    selected_count: int
+    selected_length: float
+    selected_sections: dict[str, int]
+    error_message: str = ""
 
 
 UTILITY_VIEWS = (
@@ -153,6 +182,7 @@ class StaadExtApplication:
         self._current_view = "dashboard"
         self._status_text = tk.StringVar(value="Ready")
         self._status_kind = "muted"
+        self.recent_outputs: list[DeliverableRecord] = []
         self._configure_styles()
         self._build_shell()
         self.show_view("dashboard")
@@ -424,50 +454,423 @@ class StaadExtApplication:
             font=("Segoe UI", 9), cursor="hand2",
         )
 
-    def _build_dashboard(self) -> None:
-        self._page_header(
-            "Engineering workspace",
-            "Run focused STAAD.Pro utilities from one consistent workspace.",
+    def _record_output(self, label: str, file_path: Path) -> None:
+        now = datetime.now().strftime("%I:%M %p")
+        self.recent_outputs.insert(
+            0,
+            DeliverableRecord(
+                timestamp=now,
+                label=label,
+                file_path=file_path,
+                status="Completed",
+            ),
         )
-        hero = self._panel(self.content, 25)
-        hero.pack(fill="x", pady=(0, 18))
+        if len(self.recent_outputs) > 20:
+            self.recent_outputs.pop()
+
+    def _open_file_externally(self, path: Path | None) -> None:
+        if not path or not path.exists():
+            messagebox.showwarning(
+                "File Not Found", f"The file does not exist on disk:\n{path}", parent=self.root
+            )
+            return
+        try:
+            os.startfile(str(path))
+        except Exception as exc:
+            messagebox.showerror(
+                "Cannot Open File", f"Could not open {path}:\n{exc}", parent=self.root
+            )
+
+    def _reveal_file_in_explorer(self, path: Path | None) -> None:
+        if not path:
+            return
+        try:
+            if path.is_file() and path.exists():
+                subprocess.Popen(f'explorer /select,"{path}"')
+            elif path.parent.exists():
+                os.startfile(str(path.parent))
+            else:
+                messagebox.showwarning(
+                    "Location Not Found", f"Path does not exist:\n{path}", parent=self.root
+                )
+        except Exception as exc:
+            messagebox.showerror("Error", f"Could not reveal location:\n{exc}", parent=self.root)
+
+    def _open_std_in_editor(self, path: Path | None) -> None:
+        if not path or not path.exists():
+            messagebox.showwarning(
+                "Model File Not Found",
+                "The model file does not exist on disk or has not been saved.",
+                parent=self.root,
+            )
+            return
+        try:
+            subprocess.Popen(["notepad.exe", str(path)])
+        except Exception:
+            self._open_file_externally(path)
+
+    def _query_model_telemetry(self) -> ModelTelemetry:
+        try:
+            staad = OpenStaad.connect()
+        except Exception as exc:
+            return ModelTelemetry(
+                connected=False,
+                model_name="No Active Model",
+                model_path=None,
+                base_unit_str="Unknown",
+                member_count=0,
+                node_count=0,
+                support_count=0,
+                primary_cases=0,
+                combo_cases=0,
+                results_available=False,
+                selected_count=0,
+                selected_length=0.0,
+                selected_sections={},
+                error_message=str(exc),
+            )
+
+        try:
+            path = staad.model_path()
+            name = path.name
+        except Exception:
+            path = None
+            name = "STAAD Model (Active / Unsaved)"
+
+        try:
+            unit_code = staad.base_unit()
+            unit_str = "Metric (m, kN)" if unit_code == 2 else "English (in, kip)"
+        except Exception:
+            unit_str = "Metric"
+
+        try:
+            member_count = int(staad.geometry.GetMemberCount())
+        except Exception:
+            member_count = 0
+
+        try:
+            node_count = int(staad.geometry.GetNodeCount())
+        except Exception:
+            node_count = 0
+
+        try:
+            support_count = int(staad.support.GetSupportCount())
+        except Exception:
+            support_count = 0
+
+        try:
+            primary_cases = int(staad.load.GetPrimaryLoadCaseCount())
+        except Exception:
+            primary_cases = 0
+
+        try:
+            combo_cases = int(staad.load.GetLoadCombinationCaseCount())
+        except Exception:
+            combo_cases = 0
+
+        try:
+            results_available = bool(staad.output.AreResultsAvailable())
+        except Exception:
+            results_available = False
+
+        selected_count = 0
+        selected_length = 0.0
+        selected_sections: dict[str, int] = {}
+        try:
+            selected_beams = staad.selected_beams()
+            selected_count = len(selected_beams)
+            if selected_beams:
+                for b in selected_beams[:100]:
+                    try:
+                        selected_length += staad.beam_length(b)
+                    except Exception:
+                        pass
+                    try:
+                        sec_name = staad.section_name(b)
+                    except Exception:
+                        sec_name = "Unknown"
+                    selected_sections[sec_name] = selected_sections.get(sec_name, 0) + 1
+        except Exception:
+            pass
+
+        return ModelTelemetry(
+            connected=True,
+            model_name=name,
+            model_path=path,
+            base_unit_str=unit_str,
+            member_count=member_count,
+            node_count=node_count,
+            support_count=support_count,
+            primary_cases=primary_cases,
+            combo_cases=combo_cases,
+            results_available=results_available,
+            selected_count=selected_count,
+            selected_length=selected_length,
+            selected_sections=selected_sections,
+            error_message="",
+        )
+
+    def _build_dashboard(self) -> None:
+        telemetry = self._query_model_telemetry()
+
+        # Top Header row
+        header_row = tk.Frame(self.content, bg=self.BG)
+        header_row.pack(fill="x", pady=(0, 16))
+
+        header_left = tk.Frame(header_row, bg=self.BG)
+        header_left.pack(side="left", fill="x", expand=True)
         tk.Label(
-            hero, text="STAAD.Pro utilities, Made by Chetan Jangir.", bg=self.PANEL,
-            fg=self.TEXT, font=("Segoe UI", 17, "bold"),
+            header_left, text="Workspace Overview", bg=self.BG, fg=self.TEXT,
+            font=("Segoe UI", 22, "bold"),
         ).pack(anchor="w")
         tk.Label(
-            hero,
-            text="(Bro deserves a nice promotion and a hefty salary)",
-            bg=self.PANEL, fg=self.MUTED, font=("Segoe UI", 10),
-            wraplength=760, justify="left",
-        ).pack(anchor="w", pady=(8, 0))
+            header_left,
+            text="Live model telemetry, viewport selection inspector, and session deliverables.",
+            bg=self.BG, fg=self.MUTED, font=("Segoe UI", 10),
+        ).pack(anchor="w", pady=(3, 0))
 
-        cards = tk.Frame(self.content, bg=self.BG)
-        cards.pack(fill="both", expand=True)
-        for index, utility in enumerate(UTILITY_VIEWS):
-            row, column = divmod(index, DASHBOARD_COLUMNS)
-            cards.grid_columnconfigure(column, weight=1, uniform="utilities")
-            cards.grid_rowconfigure(row, weight=1, uniform="utilityrows")
-            card = self._panel(cards, 22)
-            card.grid(row=row, column=column, sticky="nsew",
-                      padx=(0 if column == 0 else 9,
-                            9 if column < DASHBOARD_COLUMNS - 1 else 0),
-                      pady=(0 if row == 0 else 9, 0))
-            tk.Label(
-                card, text=f"{index + 1:02d}", bg=self.PANEL, fg=self.ACCENT,
-                font=("Consolas", 10, "bold"),
-            ).pack(anchor="w")
-            tk.Label(
-                card, text=utility.title, bg=self.PANEL, fg=self.TEXT,
-                font=("Segoe UI", 15, "bold"),
-            ).pack(anchor="w", pady=(12, 7))
-            tk.Label(
-                card, text=utility.description, bg=self.PANEL, fg=self.MUTED,
-                font=("Segoe UI", 9), wraplength=330, justify="left",
-            ).pack(anchor="w")
+        header_right = tk.Frame(header_row, bg=self.BG)
+        header_right.pack(side="right", anchor="e")
+
+        self._secondary_button(
+            header_right, "⟳ Refresh State", lambda: self.show_view("dashboard")
+        ).pack(side="left", padx=(0, 8))
+
+        if telemetry.connected and telemetry.model_path:
             self._secondary_button(
-                card, "Open utility", lambda selected=utility.key: self.show_view(selected)
-            ).pack(anchor="w", pady=(20, 0))
+                header_right, "Open Folder",
+                lambda p=telemetry.model_path: self._reveal_file_in_explorer(p),
+            ).pack(side="left", padx=(0, 8))
+            self._secondary_button(
+                header_right, "Open .STD",
+                lambda p=telemetry.model_path: self._open_std_in_editor(p),
+            ).pack(side="left")
+
+        # Active Model Card
+        model_panel = self._panel(self.content, 18)
+        model_panel.pack(fill="x", pady=(0, 14))
+
+        status_color = self.SUCCESS if telemetry.connected else self.ERROR
+        status_dot_text = "●"
+        status_label = "CONNECTED TO STAAD.PRO" if telemetry.connected else "STAAD.PRO DISCONNECTED"
+
+        title_row = tk.Frame(model_panel, bg=self.PANEL)
+        title_row.pack(fill="x")
+
+        title_left = tk.Frame(title_row, bg=self.PANEL)
+        title_left.pack(side="left", fill="x", expand=True)
+
+        meta_line = tk.Frame(title_left, bg=self.PANEL)
+        meta_line.pack(anchor="w")
+        tk.Label(
+            meta_line, text=status_dot_text, bg=self.PANEL, fg=status_color,
+            font=("Segoe UI", 10, "bold"),
+        ).pack(side="left", padx=(0, 6))
+        tk.Label(
+            meta_line, text=status_label, bg=self.PANEL, fg=status_color,
+            font=("Segoe UI", 8, "bold"),
+        ).pack(side="left")
+
+        tk.Label(
+            title_left, text=telemetry.model_name, bg=self.PANEL, fg=self.TEXT,
+            font=("Segoe UI", 15, "bold"),
+        ).pack(anchor="w", pady=(4, 0))
+
+        if telemetry.connected and telemetry.model_path:
+            tk.Label(
+                title_left, text=str(telemetry.model_path), bg=self.PANEL, fg=self.MUTED,
+                font=("Consolas", 8), wraplength=650, justify="left",
+            ).pack(anchor="w", pady=(2, 0))
+        elif not telemetry.connected:
+            tk.Label(
+                title_left,
+                text="Launch STAAD.Pro 2025 and open a structure, then click '⟳ Refresh State'.",
+                bg=self.PANEL, fg=self.MUTED, font=("Segoe UI", 9),
+            ).pack(anchor="w", pady=(2, 0))
+
+        # Pills on right
+        pills_frame = tk.Frame(title_row, bg=self.PANEL)
+        pills_frame.pack(side="right", anchor="e")
+
+        if telemetry.connected:
+            analysis_text = "✓ Results Available" if telemetry.results_available else "○ Not Analyzed"
+            analysis_color = self.SUCCESS if telemetry.results_available else self.MUTED
+            tk.Label(
+                pills_frame, text=analysis_text, bg=self.PANEL_ALT, fg=analysis_color,
+                font=("Segoe UI", 9, "bold"), padx=11, pady=5,
+            ).pack(side="right", padx=(8, 0))
+            tk.Label(
+                pills_frame, text=f"Unit: {telemetry.base_unit_str}", bg=self.PANEL_ALT,
+                fg=self.MUTED, font=("Segoe UI", 9), padx=11, pady=5,
+            ).pack(side="right")
+
+        # 4 KPI Stat Tiles
+        kpi_row = tk.Frame(self.content, bg=self.BG)
+        kpi_row.pack(fill="x", pady=(0, 14))
+        for col_idx in range(4):
+            kpi_row.grid_columnconfigure(col_idx, weight=1, uniform="kpi")
+
+        def add_kpi(col: int, title: str, main_val: str, sub_val: str, val_color: str = self.TEXT) -> None:
+            card = self._panel(kpi_row, 14)
+            card.grid(row=0, column=col, sticky="nsew",
+                      padx=(0 if col == 0 else 6, 0 if col == 3 else 6))
+            tk.Label(
+                card, text=title, bg=self.PANEL, fg=self.MUTED,
+                font=("Segoe UI", 8, "bold"),
+            ).pack(anchor="w")
+            tk.Label(
+                card, text=main_val, bg=self.PANEL, fg=val_color,
+                font=("Segoe UI", 16, "bold"),
+            ).pack(anchor="w", pady=(3, 1))
+            tk.Label(
+                card, text=sub_val, bg=self.PANEL, fg=self.MUTED,
+                font=("Segoe UI", 8),
+            ).pack(anchor="w")
+
+        if telemetry.selected_count > 0:
+            sel_sub = f"Length: {telemetry.selected_length:.1f} m"
+            sel_color = self.SUCCESS
+        else:
+            sel_sub = "No selection"
+            sel_color = self.TEXT
+        add_kpi(0, "VIEWPORT SELECTION", f"{telemetry.selected_count} Beams", sel_sub, sel_color)
+        add_kpi(1, "MODEL GEOMETRY", f"{telemetry.member_count} Members", f"{telemetry.node_count} Nodes")
+        add_kpi(2, "SUPPORTS", f"{telemetry.support_count} Supports", "Boundary restraints")
+        add_kpi(3, "LOAD CASES", f"{telemetry.primary_cases} Primary", f"{telemetry.combo_cases} Combinations")
+
+        # Two-Column Lower Content Area
+        lower_row = tk.Frame(self.content, bg=self.BG)
+        lower_row.pack(fill="both", expand=True)
+        lower_row.grid_columnconfigure(0, weight=6, uniform="lower")
+        lower_row.grid_columnconfigure(1, weight=5, uniform="lower")
+        lower_row.grid_rowconfigure(0, weight=1)
+
+        # Left Column: Selection & Sections Inspector
+        left_panel = self._panel(lower_row, 16)
+        left_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+
+        tk.Label(
+            left_panel, text="VIEWPORT SELECTION & SECTIONS", bg=self.PANEL,
+            fg=self.MUTED, font=("Segoe UI", 8, "bold"),
+        ).pack(anchor="w", pady=(0, 10))
+
+        if telemetry.selected_count > 0:
+            sel_info = tk.Frame(left_panel, bg=self.PANEL_ALT, padx=12, pady=10)
+            sel_info.pack(fill="x", pady=(0, 10))
+            tk.Label(
+                sel_info,
+                text=f"{telemetry.selected_count} analytical member(s) highlighted in STAAD.Pro",
+                bg=self.PANEL_ALT, fg=self.TEXT, font=("Segoe UI", 9, "bold"),
+            ).pack(anchor="w")
+            tk.Label(
+                sel_info,
+                text=f"Total analytical length: {telemetry.selected_length:.2f} m",
+                bg=self.PANEL_ALT, fg=self.MUTED, font=("Segoe UI", 8),
+            ).pack(anchor="w", pady=(2, 0))
+
+            tk.Label(
+                left_panel, text="Section Profile Distribution:", bg=self.PANEL,
+                fg=self.MUTED, font=("Segoe UI", 8, "bold"),
+            ).pack(anchor="w", pady=(4, 6))
+
+            tree_container = tk.Frame(left_panel, bg=self.PANEL)
+            tree_container.pack(fill="both", expand=True)
+            tree_container.grid_rowconfigure(0, weight=1)
+            tree_container.grid_columnconfigure(0, weight=1)
+
+            sec_tree = ttk.Treeview(
+                tree_container, columns=("profile", "count"), show="headings",
+                style="Dark.Treeview", height=5,
+            )
+            sec_tree.heading("profile", text="Section Profile Name")
+            sec_tree.heading("count", text="Members")
+            sec_tree.column("profile", width=220, anchor="w")
+            sec_tree.column("count", width=70, anchor="e")
+
+            scroll = ttk.Scrollbar(tree_container, orient="vertical", command=sec_tree.yview,
+                                   style="Dark.Vertical.TScrollbar")
+            sec_tree.configure(yscrollcommand=scroll.set)
+            sec_tree.grid(row=0, column=0, sticky="nsew")
+            scroll.grid(row=0, column=1, sticky="ns")
+
+            for sec_name, count in sorted(telemetry.selected_sections.items(), key=lambda x: -x[1]):
+                sec_tree.insert("", "end", values=(sec_name, str(count)))
+        else:
+            empty_box = tk.Frame(left_panel, bg=self.PANEL_ALT, padx=16, pady=24)
+            empty_box.pack(fill="both", expand=True)
+            tk.Label(
+                empty_box, text="No members currently selected",
+                bg=self.PANEL_ALT, fg=self.TEXT, font=("Segoe UI", 11, "bold"),
+            ).pack(anchor="center", pady=(20, 6))
+            tk.Label(
+                empty_box,
+                text="Highlight members in the STAAD.Pro 3D view and click '⟳ Refresh State' above to inspect section profiles, calculate fabrication summaries, or export drawings.",
+                bg=self.PANEL_ALT, fg=self.MUTED, font=("Segoe UI", 9),
+                wraplength=330, justify="center",
+            ).pack(anchor="center")
+
+        # Right Column: Session Deliverables
+        right_panel = self._panel(lower_row, 16)
+        right_panel.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+
+        tk.Label(
+            right_panel, text="SESSION DELIVERABLES", bg=self.PANEL,
+            fg=self.MUTED, font=("Segoe UI", 8, "bold"),
+        ).pack(anchor="w", pady=(0, 10))
+
+        if not self.recent_outputs:
+            empty_outputs = tk.Frame(right_panel, bg=self.PANEL_ALT, padx=16, pady=24)
+            empty_outputs.pack(fill="both", expand=True)
+            tk.Label(
+                empty_outputs, text="No files generated this session",
+                bg=self.PANEL_ALT, fg=self.TEXT, font=("Segoe UI", 11, "bold"),
+            ).pack(anchor="center", pady=(20, 6))
+            tk.Label(
+                empty_outputs,
+                text="Outputs from STD to DXF, GA Drawing, STD to IFC, or 2D Frame Generator will appear here with one-click shortcuts to open in CAD/BIM or view in Explorer.",
+                bg=self.PANEL_ALT, fg=self.MUTED, font=("Segoe UI", 9),
+                wraplength=300, justify="center",
+            ).pack(anchor="center")
+        else:
+            outputs_box = tk.Frame(right_panel, bg=self.PANEL)
+            outputs_box.pack(fill="both", expand=True)
+            for record in self.recent_outputs[:6]:
+                row_card = tk.Frame(outputs_box, bg=self.PANEL_ALT, padx=12, pady=9)
+                row_card.pack(fill="x", pady=(0, 6))
+
+                top_line = tk.Frame(row_card, bg=self.PANEL_ALT)
+                top_line.pack(fill="x")
+                tk.Label(
+                    top_line, text=record.file_path.name, bg=self.PANEL_ALT, fg=self.TEXT,
+                    font=("Segoe UI", 9, "bold"),
+                ).pack(side="left")
+                tk.Label(
+                    top_line, text=f"{record.label} • {record.timestamp}", bg=self.PANEL_ALT,
+                    fg=self.MUTED, font=("Segoe UI", 8),
+                ).pack(side="right")
+
+                btn_line = tk.Frame(row_card, bg=self.PANEL_ALT)
+                btn_line.pack(fill="x", pady=(4, 0))
+                tk.Label(
+                    btn_line, text=str(record.file_path.parent), bg=self.PANEL_ALT,
+                    fg="#64748b", font=("Consolas", 7), wraplength=200,
+                ).pack(side="left")
+
+                open_btn = tk.Button(
+                    btn_line, text="Open", bg=self.PANEL, fg=self.TEXT,
+                    activebackground=self.BORDER, activeforeground=self.TEXT,
+                    relief="flat", bd=0, padx=8, pady=2, font=("Segoe UI", 8),
+                    cursor="hand2", command=lambda p=record.file_path: self._open_file_externally(p),
+                )
+                open_btn.pack(side="right", padx=(4, 0))
+
+                folder_btn = tk.Button(
+                    btn_line, text="Folder", bg=self.PANEL, fg=self.TEXT,
+                    activebackground=self.BORDER, activeforeground=self.TEXT,
+                    relief="flat", bd=0, padx=8, pady=2, font=("Segoe UI", 8),
+                    cursor="hand2", command=lambda p=record.file_path: self._reveal_file_in_explorer(p),
+                )
+                folder_btn.pack(side="right")
 
     def _build_dxf_view(self, utility: UtilityView) -> None:
         self._page_header(utility.title, utility.description)
@@ -596,6 +999,7 @@ class StaadExtApplication:
             )
             count = export_selected_members(OpenStaad.connect(), output, settings)
             if count:
+                self._record_output("STD to DXF", output)
                 self._set_status(
                     f"Exported {count} member(s) to {output}", "success"
                 )
@@ -720,6 +1124,7 @@ class StaadExtApplication:
             )
             count = export_ga_drawing(OpenStaad.connect(), output, settings)
             if count:
+                self._record_output("GA Drawing", output)
                 self._set_status(f"Exported {count} member(s) to {output}", "success")
             else:
                 self._set_status(
@@ -777,6 +1182,7 @@ class StaadExtApplication:
             settings = IfcExportSettings(self.ifc_selected_only.get())
             count = export_structure(OpenStaad.connect(), output, settings)
             if count:
+                self._record_output("STD to IFC", output)
                 self._set_status(
                     f"Exported {count} member(s) to {output}", "success"
                 )
@@ -1638,7 +2044,9 @@ class StaadExtApplication:
                 filetypes=(("STAAD Files", "*.std"), ("All Files", "*.*")),
             )
             if selected:
-                Path(selected).write_text(std_content, encoding="utf-8")
+                saved_path = Path(selected)
+                saved_path.write_text(std_content, encoding="utf-8")
+                self._record_output("2D Frame (.STD)", saved_path)
                 self._set_status(f"Saved STAAD file to {selected}", "success")
         except (OSError, TypeError, ValueError) as exc:
             self._set_status(str(exc), "error")
