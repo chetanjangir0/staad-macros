@@ -27,4 +27,4 @@ where = ["src"]
 testpaths = ["tests"]
 
 [tool.setuptools.package-data]
-staad_ext = ["wind_profiles/*.xlsx", "wind_profiles/*.yaml", "assets/*"]
+staad_ext = ["wind_profiles/*.xlsx", "wind_profiles/*.yaml", "assets/*"]
