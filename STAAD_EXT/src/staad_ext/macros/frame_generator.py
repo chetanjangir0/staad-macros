@@ -19,6 +19,7 @@ def seismic_zone_factor(seismic_zone: str) -> float:
 class FrameParameters:
     width: float = 20.0  # m
     eave_height: float = 7.0  # m
+    plinth_height: float = 0.0  # m, height of plinth above FFL (feeds IS 875 wind load F7)
     ridge_distance: float = 10.0  # m (from left column)
     slope: float = 5.0  # 1:x slope (e.g. 5 means 1 in 5 slope)
     col_mode: str = "count"  # "count" or "spacing"
@@ -57,6 +58,12 @@ class FrameParameters:
             raise ValueError("Frame width must be greater than 0.")
         if self.eave_height <= 0:
             raise ValueError("Eave height must be greater than 0.")
+        if self.plinth_height < 0:
+            raise ValueError("Plinth height cannot be negative.")
+        if self.plinth_height >= self.eave_height:
+            raise ValueError(
+                f"Plinth height ({self.plinth_height} m) must be less than eave height ({self.eave_height} m)."
+            )
         if self.ridge_distance <= 0 or self.ridge_distance >= self.width:
             raise ValueError(
                 f"Ridge distance ({self.ridge_distance} m) must be between 0 and width ({self.width} m)."
@@ -642,6 +649,7 @@ def generate_std_file_content(params: FrameParameters) -> str:
             terrain_category=params.wind_terrain_category,
             bay_spacing=params.bay_spacing,
             opening=params.wind_opening,
+            plinth_height=params.plinth_height,
         )
         wind_lines = generate_is875_wind_load_lines(
             wind_params, next_load_num, left_col, left_raf, right_raf, right_col

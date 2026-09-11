@@ -21,18 +21,16 @@ This module deliberately preserves several workbook quirks rather than
     version. We replicate that exactly rather than "helpfully" wiring up
     the textbook IS 875 risk-coefficient formula.
   * F8 ("h2-Eaves height from FFL", used in the Pd 0.8x-below-10m rule and
-    in the wall-area Ka lookup) is treated as equal to F10 ("h-Eaves height
-    from FGL", i.e. `height`). This mirrors F10's own formula (`=F7+F8`)
-    with the plinth height F7 pinned at 0 -- there is no separate "plinth
-    height" input in this tool's UI, so the only self-consistent reading of
-    F8 is that it equals `height` too. (An earlier revision of this port
-    hard-coded F8 to the workbook's shipped demo value of 28.5 m, matching
-    a 9-cell Excel COM driver that never wrote F7/F8 at all; that was a
-    genuine bug, not a faithful quirk, because it silently disconnected
-    `height` from the Ka wall-area lookup and the K152 "<10m" branch for
-    every real building shorter than 10 m -- i.e. almost all of them. Fixed
-    here, and the golden fixtures were regenerated with a corrected driver
-    that writes F7=0 and F8=height.)
+    in the wall-area Ka lookup) is derived as F10 - F7 = `height -
+    plinth_height`, matching F10's own formula (`=F7+F8`). `plinth_height`
+    is a real user input (Frame Geometry section, defaults to 0 m). (An
+    earlier revision of this port hard-coded F8 to the workbook's shipped
+    demo value of 28.5 m, matching a 9-cell Excel COM driver that never
+    wrote F7/F8 at all; that was a genuine bug, not a faithful quirk,
+    because it silently disconnected `height` from the Ka wall-area lookup
+    and the K152 "<10m" branch for every real building shorter than 10 m --
+    i.e. almost all of them. Fixed by writing F7=plinth_height and
+    F8=height-plinth_height.)
   * Sheet1's "parallel to ridge" roof force (B97/B98) and its 90 degree
     suction counterpart (B106/B107) both reference the SAME near-roof-plane
     cell (B50, i.e. WL sheet F264) for what are labelled "Near Roof Plane"
@@ -71,12 +69,6 @@ _K4_CYCLONIC_FACTOR = 1.0
 #: K1 - Risk coefficient -- WL-Single Gable-MBS!F39 (plain VALUE = 1, NOT a
 #: formula driven by Table 1 / PN / design life; see module docstring).
 _K1_RISK_COEFFICIENT = 1.0
-
-#: "h1-Height of plinth" -- WL-Single Gable-MBS!F7. Pinned at 0: this
-#: tool's UI has no separate plinth-height input, so F10 (=F7+F8, eaves
-#: height from FGL, which we set directly from the user's `height`) is
-#: only self-consistent with F7=0 and F8=height. See module docstring.
-_PLINTH_HEIGHT_M = 0.0
 
 #: Table 1, IS 875 (Part 3) 1987 -- WL-Single Gable-MBS!E29:G34. Not used
 #: in the final calculation chain (K1 is hard-coded, see above) but kept
@@ -229,6 +221,7 @@ class Is875WindParameters:
     terrain_category: int  # 1-4 (F15)
     bay_spacing: float  # m (I7)
     opening: str  # one of OPENING_OPTIONS
+    plinth_height: float = 0.0  # m, "h1-Height of plinth" (F7)
 
     def cpi(self) -> float:
         try:
@@ -389,21 +382,20 @@ def area_reduction_factor_ka(area_sqm: float) -> float:
     return bp[-1][1]  # unreachable, kept for safety
 
 
-def eaves_height_ffl(height_m: float) -> float:
+def eaves_height_ffl(height_m: float, plinth_height_m: float = 0.0) -> float:
     """F8 ("h2-Eaves height from FFL") -- WL-Single Gable-MBS!F8, taken as
-    F10 - F7 = height - plinth_height = height - 0 (see module docstring:
-    this tool has no separate plinth-height input, so F7 is pinned at 0).
+    F10 - F7 = height - plinth_height.
     """
-    return height_m - _PLINTH_HEIGHT_M
+    return height_m - plinth_height_m
 
 
-def combined_area_factor_ka(width_m: float, bay_spacing_m: float, height_m: float) -> float:
+def combined_area_factor_ka(width_m: float, bay_spacing_m: float, height_m: float, plinth_height_m: float = 0.0) -> float:
     """Ka (combined) -- WL-Single Gable-MBS!J147: `=MAX(N146,N147)`, the
     larger of the roof-area Ka (M146 = I7*F6 = bay_spacing*width) and the
     wall-area Ka (M147 = I7*F8 = bay_spacing * eaves_height_ffl(height)).
     """
     roof_area = bay_spacing_m * width_m  # M146
-    wall_area = bay_spacing_m * eaves_height_ffl(height_m)  # M147
+    wall_area = bay_spacing_m * eaves_height_ffl(height_m, plinth_height_m)  # M147
     ka_roof = area_reduction_factor_ka(roof_area)  # N146
     ka_wall = area_reduction_factor_ka(wall_area)  # N147
     return max(ka_roof, ka_wall)  # J147
@@ -414,17 +406,18 @@ def combined_area_factor_ka(width_m: float, bay_spacing_m: float, height_m: floa
 # ---------------------------------------------------------------------------
 
 
-def design_wind_pressure_pd(pz: float, ka: float, height_m: float) -> float:
+def design_wind_pressure_pd(pz: float, ka: float, height_m: float, plinth_height_m: float = 0.0) -> float:
     """Pd - Design wind pressure (kN/m^2) -- WL-Single Gable-MBS!F152 and
     K152:
       K152 = IF(F8<10, 0.8*Pz*Kd*Ka*Kc, Pz*Kd*Ka*Kc)
       F152 = IF(K152 < 0.7*Pz, 0.7*Pz, K152)   -- the "0.7 x Pz floor"
 
-    `height_m` feeds F8 via eaves_height_ffl() (see module docstring).
+    `height_m`/`plinth_height_m` feed F8 via eaves_height_ffl() (see module
+    docstring).
     """
     kd = _KD_DIRECTIONAL_FACTOR
     kc = _KC_COMBINATION_FACTOR
-    eaves_height_ffl_m = eaves_height_ffl(height_m)
+    eaves_height_ffl_m = eaves_height_ffl(height_m, plinth_height_m)
     if eaves_height_ffl_m < 10:
         k152 = 0.8 * pz * kd * ka * kc
     else:
@@ -610,8 +603,8 @@ def zone_forces(params: Is875WindParameters) -> ZoneForces:
     k2 = terrain_height_size_factor_k2(params.terrain_category, height)
     vz = design_wind_speed_vz(params.basic_wind_speed, params.terrain_category, height, params.design_life)
     pz = design_wind_pressure_pz(vz)
-    ka = combined_area_factor_ka(width, bay, height)
-    pd = design_wind_pressure_pd(pz, ka, height)  # Sheet1!B14 = WL!F152
+    ka = combined_area_factor_ka(width, bay, height, params.plinth_height)
+    pd = design_wind_pressure_pd(pz, ka, height, params.plinth_height)  # Sheet1!B14 = WL!F152
 
     h_over_w = height / width  # WL!F161 = Sheet1!B31
     l_over_w = length / width  # WL!F162 = Sheet1!B32

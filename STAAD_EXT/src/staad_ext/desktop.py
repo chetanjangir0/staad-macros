@@ -1673,6 +1673,7 @@ class StaadExtApplication:
 
         self.fg_width = tk.StringVar(value="20.0")
         self.fg_eave_height = tk.StringVar(value="7.0")
+        self.fg_plinth_height = tk.StringVar(value="0.0")
         self.fg_ridge_distance = tk.StringVar(value="10.0")
         self.fg_slope = tk.StringVar(value="5.0")
         self.fg_brick_wall_height = tk.StringVar(value="0.0")
@@ -1704,7 +1705,7 @@ class StaadExtApplication:
         self.fg_design_code = tk.StringVar(value="IS 800:2007")
 
         all_vars: list[tk.Variable] = [
-            self.fg_width, self.fg_eave_height, self.fg_ridge_distance, self.fg_slope,
+            self.fg_width, self.fg_eave_height, self.fg_plinth_height, self.fg_ridge_distance, self.fg_slope,
             self.fg_brick_wall_height, self.fg_col_mode, self.fg_col_input,
             self.fg_mezzanine_enabled, self.fg_mezzanine_height, self.fg_mezzanine_start_x,
             self.fg_mezzanine_end_x, self.fg_bay_spacing, self.fg_left_support,
@@ -1722,6 +1723,7 @@ class StaadExtApplication:
         row += 1
         row = self._form_row(form_frame, "Width (m):", self.fg_width, row)
         row = self._form_row(form_frame, "Eave Height (m):", self.fg_eave_height, row)
+        row = self._form_row(form_frame, "Plinth Height (m):", self.fg_plinth_height, row)
         row = self._form_row(form_frame, "Ridge Distance (m):", self.fg_ridge_distance, row)
         row = self._form_row(form_frame, "Roof Slope (1:x):", self.fg_slope, row)
         row = self._form_row(form_frame, "Brick Wall Ht (m):", self.fg_brick_wall_height, row)
@@ -1898,6 +1900,7 @@ class StaadExtApplication:
         return FrameParameters(
             width=float(self.fg_width.get().strip()),
             eave_height=float(self.fg_eave_height.get().strip()),
+            plinth_height=float(self.fg_plinth_height.get().strip() or "0"),
             ridge_distance=float(self.fg_ridge_distance.get().strip()),
             slope=float(self.fg_slope.get().strip()),
             col_mode=self.fg_col_mode.get(),
