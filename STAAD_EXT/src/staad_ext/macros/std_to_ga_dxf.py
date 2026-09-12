@@ -180,7 +180,10 @@ def mark_anchor(member: Member) -> Point3D:
     unit = mark_direction(member)
     start, end = member.start, member.end
     middle = Point3D((start.x + end.x) / 2, (start.y + end.y) / 2, (start.z + end.z) / 2)
-    return move(middle, unit, member.half_width)
+    # Aim at the face that was drawn: a tapered member's straightened flange
+    # sits further out than half its depth, and a leader stopping at
+    # half_width would land inside the member.
+    return move(middle, unit, member.reach(unit))
 
 
 def mark_direction(member: Member) -> Point3D:

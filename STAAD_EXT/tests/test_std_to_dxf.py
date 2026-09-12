@@ -5,10 +5,11 @@ import pytest
 
 from staad_ext.dxf import DxfWriter
 from staad_ext.framing import (
-    apply_peb_corner_joins, inner_face_lines, is_tapered, member_envelope, project,
+    Member, apply_peb_corner_joins, envelope_points, inner_face_lines, is_tapered,
+    member_envelope, offset_vector, project,
 )
 from staad_ext.macros.std_to_dxf import (
-    write_connection_face_lines, write_member_envelope,
+    _label, _write_label, write_connection_face_lines, write_member_envelope,
 )
 from staad_ext.models import ExportSettings, Point3D, SectionEnvelope, ViewPlane
 
@@ -381,3 +382,35 @@ def test_a_hollow_section_takes_its_wall_thickness_from_its_values() -> None:
 
 def test_an_unreadable_section_leaves_no_thickness() -> None:
     assert member_envelope(ThicknessStaad(table=None), 1, 4.0).wall_thickness == 0.0
+
+def tapered_rafter(start=Point3D(0, 0), end=Point3D(6, 1), start_half_width=0.2,
+                   end_half_width=0.4, fixed_width=0.6) -> Member:
+    """A rafter drawn with its top flange straightened onto ``fixed_width``."""
+    envelope = SectionEnvelope(start_half_width, end_half_width, 675)
+    return Member(
+        number=1, start=start, end=end, incidence=(1, 2), length=6.083,
+        envelope=envelope, name="TAPERED",
+        outline=envelope_points(start, end, envelope, "TAPERED", fixed_width, 0.0),
+    )
+
+
+def label_points(dxf: str) -> list[Point3D]:
+    return [Point3D(float(chunk.split("\n10\n")[1].split("\n")[0]),
+                    float(chunk.split("\n20\n")[1].split("\n")[0]))
+            for chunk in dxf.split("0\nTEXT\n")[1:]]
+
+
+def test_a_straightened_flange_pushes_its_label_clear_of_the_drawn_face() -> None:
+    # The top flange is drawn at fixed_width from the centerline, well past
+    # this member's own half depth, so a label offset by half_width alone
+    # would be laid over the flange line.
+    member = tapered_rafter()
+    stream = StringIO()
+    _write_label(DxfWriter(stream), member, _label(member), ExportSettings())
+
+    unit = offset_vector(member.start, member.end)
+    def offset(point):
+        return (point.x - member.start.x) * unit.x + (point.y - member.start.y) * unit.y
+    flange = max(offset(point) for point in member.outline)
+    assert flange == pytest.approx(0.6)
+    assert min(offset(point) for point in label_points(stream.getvalue())) > flange

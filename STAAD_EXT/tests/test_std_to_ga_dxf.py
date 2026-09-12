@@ -4,7 +4,7 @@ from math import cos, hypot, radians, sin
 import pytest
 
 from staad_ext.dxf import DxfWriter
-from staad_ext.framing import FramingModel, Member, move
+from staad_ext.framing import FramingModel, Member, envelope_points, move
 from staad_ext.macros.std_to_ga_dxf import (
     GA_LAYERS, MARK_LEADER_RADII, build_schedule, describe_section, export_ga_drawing,
     label_rotation, mark_anchor, mark_direction, mark_radius, member_grade,
@@ -23,8 +23,7 @@ def make_member(number=1, property_type=675, values=None, name="TAPERED",
         number=number, start=start, end=end, incidence=(number, number + 1),
         length=length, envelope=envelope, name=name,
         property_values=list(values or []),
-        outline=[Point3D(-half_width, 0), Point3D(-half_width, 4),
-                 Point3D(half_width, 0), Point3D(half_width, 4)],
+        outline=envelope_points(start, end, envelope, name, half_width, 0.0),
     )
 
 

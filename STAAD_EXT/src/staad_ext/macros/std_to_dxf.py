@@ -260,12 +260,13 @@ def _write_connection_detail(
             _line(writer, "CONNECTION_CLEATS", apex, shoulder)
 
 
-def _write_label(writer: DxfWriter, start: Point3D, end: Point3D, value: str,
-                 half_width: float, settings: ExportSettings, color: int = 7) -> None:
+def _write_label(writer: DxfWriter, member: Member, value: str,
+                 settings: ExportSettings, color: int = 7) -> None:
+    start, end = member.start, member.end
     if end.x < start.x:
         start, end = end, start
     length = dist((start.x, start.y, start.z), (end.x, end.y, end.z))
-    height = max(length * LABEL_HEIGHT_FACTOR, half_width * 0.45) * settings.text_scale
+    height = max(length * LABEL_HEIGHT_FACTOR, member.half_width * 0.45) * settings.text_scale
     height = max(height, MIN_LABEL_HEIGHT)
     chars = len(value.replace(r"\P", ""))
     if chars and length > 0:
@@ -274,7 +275,9 @@ def _write_label(writer: DxfWriter, start: Point3D, end: Point3D, value: str,
     if unit.y < 0:
         unit = Point3D(-unit.x, -unit.y, -unit.z)
     middle = Point3D((start.x + end.x) / 2, (start.y + end.y) / 2, (start.z + end.z) / 2)
-    location = move(middle, unit, half_width + height * 1.5)
+    # Clear the drawn face, not half the section: a straightened tapered
+    # flange stands off the centerline further than half_width.
+    location = move(middle, unit, member.reach(unit) + height * 1.5)
     writer.colored_label("MEMBER_LABELS", location, height,
                          degrees(atan2(end.y - start.y, end.x - start.x)), value, unit, color)
 
@@ -298,8 +301,7 @@ def export_selected_members(staad, output: Path, settings: ExportSettings) -> in
                 color=color,
             )
             if settings.write_labels:
-                _write_label(writer, member.start, member.end, _label(member),
-                             member.half_width, settings, color or 7)
+                _write_label(writer, member, _label(member), settings, color or 7)
         if settings.connection_face_lines:
             write_connection_face_lines(
                 writer, model.outlines(), model.centerlines(), model.open_ends

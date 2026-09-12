@@ -49,6 +49,27 @@ class Member:
     def centerline(self) -> tuple[Point3D, Point3D]:
         return self.start, self.end
 
+    def reach(self, unit: Point3D) -> float:
+        """How far the drawn outline stands off the centerline along ``unit``.
+
+        ``half_width`` measures the section about its own centerline, but a
+        tapered member is not drawn about it: :func:`envelope_points`
+        straightens one face onto the line shared by every connected tapered
+        member, so a rafter's top flange can sit a long way past this member's
+        own half depth. Anything placed clear of a member -- a label, a mark
+        leader -- has to clear the outline that was actually drawn, so it asks
+        for this rather than for ``half_width``.
+
+        ``unit`` is a unit normal to the centerline; the answer is the largest
+        perpendicular offset of any outline corner on that side, never less
+        than ``half_width`` so an un-outlined member still reads sensibly.
+        """
+        offsets = [
+            (point.x - self.start.x) * unit.x + (point.y - self.start.y) * unit.y
+            for point in self.outline
+        ]
+        return max([self.half_width, *offsets])
+
 
 @dataclass(frozen=True, slots=True)
 class FramingModel:
